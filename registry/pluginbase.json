@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "group": "top.mrxiaom.pluginbase",
+  "repositories": [
+    "https://repo.maven.apache.org/maven2/"
+  ],
+  "fallbackCoordinates": [
+    {
+      "group": "top.mrxiaom.PluginBase",
+      "repositories": [
+        "https://jitpack.io/"
+      ],
+      "notes": "仅在 Maven Central 无法取得资料时使用。所有模块统一使用此 group；JitPack 坐标中的 `PluginBase` 大小写不可改变。"
+    }
+  ],
+  "sourcesClassifier": "sources",
+  "javadocClassifier": "javadoc",
+  "packaging": "jar",
+  "snapshot": false,
+  "notes": "优先 Maven Central。Central 的 Javadoc 为控制发布大小而只保留 HTML，排除 JS、CSS、字体与搜索索引；工具直接检索 HTML，不依赖这些被排除文件。版本必须由目标项目的 LibraryHelper/构建脚本或用户明确输入确定；工具不得擅自替换版本。",
+  "modules": {
+    "library": {
+      "packagePrefixes": ["top.mrxiaom.pluginbase"],
+      "description": "主类、基础 API、工具与 Bukkit 默认实现。"
+    },
+    "misc": {
+      "packagePrefixes": ["top.mrxiaom.pluginbase"],
+      "description": "调度、Bungee 通道、配置更新等扩展。"
+    },
+    "paper": {
+      "packagePrefixes": ["top.mrxiaom.pluginbase.paper"],
+      "description": "Spigot/Paper 双端的物品编辑与库存工厂回退层，不等同于 Paper API 依赖。"
+    },
+    "actions": {
+      "packagePrefixes": ["top.mrxiaom.pluginbase.actions", "top.mrxiaom.pluginbase.api"],
+      "description": "配置化 Action 系统。"
+    },
+    "gui": {
+      "packagePrefixes": ["top.mrxiaom.pluginbase.func", "top.mrxiaom.pluginbase.gui", "top.mrxiaom.pluginbase.material"],
+      "description": "GUI 管理与相关模型。"
+    },
+    "l10n": {
+      "packagePrefixes": ["top.mrxiaom.pluginbase.func", "top.mrxiaom.pluginbase.func.language"],
+      "description": "语言与消息 Holder。"
+    },
+    "commands": {
+      "packagePrefixes": ["top.mrxiaom.pluginbase.utils.arguments"],
+      "description": "命令参数工具。"
+    },
+    "temporary-data": {
+      "packagePrefixes": ["top.mrxiaom.pluginbase"],
+      "description": "临时数据模块；具体符号需查证。"
+    },
+    "magic": {
+      "packagePrefixes": ["top.mrxiaom.pluginbase"],
+      "description": "Magic 模块；具体符号需查证。"
+    },
+    "config": {
+      "packagePrefixes": ["top.mrxiaom.pluginbase.configuration"],
+      "description": "配置实现。"
+    }
+  }
+}

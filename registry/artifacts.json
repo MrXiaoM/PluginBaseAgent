@@ -1,0 +1,29 @@
+{
+  "schemaVersion": 1,
+  "artifacts": {
+    "spigot": {
+      "group": "org.spigotmc",
+      "artifact": "spigot-api",
+      "repositories": [
+        "https://hub.spigotmc.org/nexus/content/repositories/snapshots/"
+      ],
+      "sourcesClassifier": "sources",
+      "javadocClassifier": "javadoc",
+      "packaging": "jar",
+      "snapshot": true,
+      "notes": "默认服务端 API。资料工具只接受项目明确提供的完整构件版本。"
+    },
+    "paper": {
+      "group": "io.papermc.paper",
+      "artifact": "paper-api",
+      "repositories": [
+        "https://repo.papermc.io/repository/maven-public/"
+      ],
+      "sourcesClassifier": "sources",
+      "javadocClassifier": "javadoc",
+      "packaging": "jar",
+      "snapshot": true,
+      "notes": "仅在项目明确使用 Paper API 时同步；PluginBase 的 paper 模块不等于此 API 选择。"
+    }
+  }
+}

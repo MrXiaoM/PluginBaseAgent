@@ -1,0 +1,8 @@
+
+state/*
+!state/README.md
+
+__pycache__/
+*.pyc
+
+skill/minecraft-pluginbase-development/assets/agent-dev-kit.zip
