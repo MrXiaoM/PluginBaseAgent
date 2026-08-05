@@ -111,6 +111,15 @@ def validate_project(root: Path, jar_override: Path | None) -> list[Finding]:
             findings.append(Finding("警告", "自动注册基类未确认", "@AutoRegister 类未检测到 Abstract* Holder/Module 基类。", path))
         if re.search(r"\b(?:Enum|Material)\.valueOf\s*\(", text):
             findings.append(Finding("错误", "不兼容的枚举解析", "使用 Util.valueOr/valueOrNull 或 Util.parse*，不要使用 Enum.valueOf/Material.valueOf。", path))
+        item_context = re.search(r"\b(?:ItemStack|ItemMeta)\b", text)
+        item_pdc_usage = re.search(r"\b(?:PersistentDataContainer|PersistentDataType|getPersistentDataContainer)\b", text)
+        if "item-nbt-api" in build.lower() and item_context and item_pdc_usage:
+            findings.append(Finding(
+                "错误",
+                "item-nbt-api 项目使用物品 PDC",
+                "检测到 item-nbt-api 依赖以及 ItemStack/ItemMeta 的 PDC 用法；物品自定义数据应使用 item-nbt-api。",
+                path,
+            ))
     paper_module = bool(re.search(r"\bpaper\b", build))
     paper_factory = any("PaperFactory" in text for text in source_texts.values())
     if paper_module and not paper_factory:

@@ -49,6 +49,12 @@
 - Inventory、InventoryView、ItemStack、ItemMeta 的可变行为以当前 API 和实现为准；修改后按已验证方式写回；
 - 标题、组件、物品数据和显示名跨版本差异较大，优先使用 PluginBase 的抽象或查证后的兼容层。
 
+## 物品自定义数据
+
+当项目已安装 `item-nbt-api`，对 `ItemStack`、`ItemMeta` 及其物品标记的自定义数据读写必须使用该依赖，不得使用 Bukkit 的 `PersistentDataContainer`、`PersistentDataType` 或 `getPersistentDataContainer()` 作为同一用途的替代方案。
+
+PDC 在此场景不符合本项目的运行效率和开发效率要求；不要因为它是 Bukkit API 就默认选择它。先以构建脚本中声明的 `item-nbt-api` 精确版本查询资料，并将物品数据访问集中在适配层，避免业务代码混用两套存储方式。此规则只针对物品自定义数据；实体、方块或其它非物品容器的 PDC 使用需按各自需求和证据另行审查。
+
 ## 配置序列化
 
 - 只把目标 API 明确支持序列化的 Bukkit 类型写入 YAML；

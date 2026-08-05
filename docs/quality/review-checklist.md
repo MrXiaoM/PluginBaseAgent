@@ -36,6 +36,7 @@
 - [ ] 可选插件 API 被隔离，缺失时核心功能不会类加载失败。
 - [ ] 配置键、默认值、类型、错误和迁移行为完整。
 - [ ] Bukkit 枚举或注册表类型没有使用 `Enum.valueOf(...)`/`Material.valueOf(...)` 解析；已使用 `Util.valueOr(...)`、`Util.valueOrNull(...)` 或相应 `Util.parse*` 包装方法，并处理默认值/`null`。
+- [ ] 构建脚本已安装 `item-nbt-api` 时，物品自定义数据没有使用 `PersistentDataContainer`、`PersistentDataType` 或 `ItemMeta#getPersistentDataContainer()`；同一物品数据只通过 `item-nbt-api` 读写。
 - [ ] 玩家/实体/世界/库存对象在延迟或异步操作前重新验证。
 - [ ] 任务、监听器、连接、文件和缓存有明确清理责任。
 - [ ] 重载不会保留旧任务、旧监听器、旧配置或已关闭资源的引用。
