@@ -55,7 +55,7 @@ python agent-dev/tools/dependency_index.py members --project . addItem --type Pl
 python agent-dev/tools/dependency_index.py show --project . --artifact <GAV或哈希前缀>
 ```
 
-`sync` 对每个可解析 Gradle 配置记录解析后的构件、项目/传递依赖边和失败项；扫描实际 JAR 类路径，并按项目锁定 GAV 流式读取同版本 `sources.jar`、`javadoc.jar`，索引公开 Java 类型、构造器、方法、字段、继承关系与短文档摘要。它不会复制或解包整个归档；缓存未命中时仅临时下载并在处理后删除。SQLite `FTS5` 让类/成员查询按需执行，不会加载整份索引。同步会实时显示 Gradle 解析、构件计数、当前构件、sources/Javadoc 摘要和最终写入进度。`--no-api` 可只同步依赖与类名；没有 Java sources、只有 Javadoc 或语言/文档结构无法可靠解析时，状态会明确标记为不完整，不能视为完整 API 证明。
+`sync` 对每个可解析 Gradle 配置记录解析后的构件、项目/传递依赖边和失败项；Gradle 还会按项目实际仓库、镜像、认证与缓存策略解析同版本 `sources.jar`、`javadoc.jar`。Python 不扫描 Gradle 缓存猜测资料，也不自行联网下载；它只流式读取 Gradle 返回的本机归档，索引公开 Java 类型、构造器、方法、字段、继承关系与短文档摘要。第 `1/4` 阶段实时转发 Gradle 日志，并在首次解析资料变体时显示 `解析资料构件 N：<GAV>:sources|javadoc`；机器索引 JSON 不会输出到终端。缺少源码时，工具会直接解析二进制 `.class` 的公开类型、字段、构造器、方法描述符与直接继承关系，而不是只保留类名。类名和公开 API 都以每批 `2,000` 条写入 SQLite；类名显示 `类名 N/M`，源码 API 显示 `公开 API 文件 N/M`，字节码回退显示 `字节码结构 N/M`。所有构件完成后才一次性重建 SQLite `FTS5` 类名与 API 索引，避免逐条维护全文索引；归档和二进制 JAR 哈希会按文件状态复用。同步还会实时显示 Gradle 解析、构件计数、资料处理和最终写入进度。`--no-api` 可只同步依赖与类名，并通知 Gradle 跳过资料变体；字节码签名没有参数名、泛型、注解、异常、源码行或 Javadoc，不能替代版本敏感调用的资料复核。
 
 查询默认最多输出 `8` 条，格式紧凑；`dependencies` 默认只列已解析构件，传递依赖边需显式加 `--transitive`。`classes` 和未限定的 `members` 都是模糊搜索；已知调用者类型时使用 `members <成员> --type <类型>`，它会沿已索引 `extends`/`implements` 链定位成员声明，并标注继承距离。使用 `--limit`、`--offset` 分页，使用 `--verbose` 查看路径、哈希与来源，使用 `--json` 供自动化工具调用。索引过期、缺失或解析失败时，查询不会静默重同步；先执行 `sync`，再根据 `sources`/Javadoc 命中复核版本敏感调用的签名、弃用、线程与语义。
 

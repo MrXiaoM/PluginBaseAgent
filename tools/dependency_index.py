@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import deque
 import hashlib
 import json
 import os
@@ -13,8 +14,11 @@ import sqlite3
 import subprocess
 import sys
 import tempfile
+import threading
+import queue
 import time
 import zipfile
+import struct
 from pathlib import Path
 from typing import Any, Iterable, Iterator
 
@@ -24,19 +28,18 @@ sys.path.insert(0, str(SCRIPT_ROOT))
 from common.evidence import (  # noqa: E402
     EvidenceError,
     default_gradle_homes,
-    download_artifact,
-    find_cached_artifacts,
     print_error,
     sha256,
 )
 
 PROJECT_ROOT = SCRIPT_ROOT.parent
 STATE_ROOT = PROJECT_ROOT / "state"
-INDEX_SCHEMA_VERSION = 3
-TOOL_VERSION = "3"
-DEFAULT_REPOSITORIES = ("https://repo.maven.apache.org/maven2/",)
+INDEX_SCHEMA_VERSION = 7
+TOOL_VERSION = "7"
 DEFAULT_LIMIT = 8
 MAX_LIMIT = 100
+CLASS_INSERT_BATCH_SIZE = 2_000
+API_INSERT_BATCH_SIZE = 2_000
 MARKER_START = "__PLUGIN_BASE_AGENT_DEPENDENCY_INDEX_START__"
 MARKER_END = "__PLUGIN_BASE_AGENT_DEPENDENCY_INDEX_END__"
 
@@ -49,11 +52,35 @@ allprojects { project ->
         doLast {
             def root = project.rootProject
             if (project != root) return
-            def output = [schemaVersion: 1, gradleVersion: gradle.gradleVersion, projects: []]
+            def output = [schemaVersion: 2, gradleVersion: gradle.gradleVersion, projects: []]
+            def includeApi = gradle.startParameter.projectProperties.get("pluginBaseAgentIncludeApi") != "false"
+            def documentationArchives = [:]
             root.allprojects.sort { it.path }.each { current ->
-                def repositories = current.repositories.findAll { repository -> repository.hasProperty("url") }
-                    .collect { repository -> repository.url.toString() }.unique()
-                def projectData = [path: current.path, name: current.name, repositories: repositories, configurations: []]
+                def documentationArchive = { artifact, classifierValue ->
+                    def id = artifact.moduleVersion.id
+                    def key = "${id.group}:${id.name}:${id.version}:${classifierValue}"
+                    if (documentationArchives.containsKey(key)) return documentationArchives[key]
+                    try {
+                        if (!id.group || !id.name || !id.version) return documentationArchives[key] = [file: "", failure: "构件没有完整 GAV"]
+                        println("[PluginBase Agent] 解析资料构件 ${documentationArchives.size() + 1}：${key}")
+                        def dependency = current.dependencies.create("${id.group}:${id.name}:${id.version}")
+                        dependency.transitive = false
+                        dependency.artifact {
+                            name = id.name
+                            type = "jar"
+                            extension = "jar"
+                            classifier = classifierValue
+                        }
+                        def detached = current.configurations.detachedConfiguration(dependency)
+                        detached.transitive = false
+                        def files = detached.resolve().findAll { it.isFile() }.sort { it.absolutePath }
+                        def selected = files.find { it.name.endsWith("-${classifierValue}.jar") } ?: files.find { it.name.endsWith(".jar") }
+                        return documentationArchives[key] = (selected ? [file: selected.absolutePath, failure: ""] : [file: "", failure: "Gradle 未解析到 ${classifierValue}.jar"])
+                    } catch (Throwable error) {
+                        return documentationArchives[key] = [file: "", failure: error.class.name + ": " + (error.message ?: "")]
+                    }
+                }
+                def projectData = [path: current.path, name: current.name, configurations: []]
                 current.configurations.findAll { configuration -> configuration.canBeResolved }.sort { it.name }.each { configuration ->
                     def configData = [name: configuration.name, status: "ok", artifacts: [], dependencies: [], failures: []]
                     try {
@@ -62,7 +89,9 @@ allprojects { project ->
                             configData.artifacts << [
                                 group: id.group ?: "", artifact: id.name ?: "", version: id.version ?: "",
                                 classifier: artifact.classifier ?: "", extension: artifact.extension ?: "",
-                                file: artifact.file.absolutePath, type: artifact.type ?: ""
+                                file: artifact.file.absolutePath, type: artifact.type ?: "",
+                                sources: includeApi ? documentationArchive(artifact, "sources") : [file: "", failure: "未请求 API 索引"],
+                                javadoc: includeApi ? documentationArchive(artifact, "javadoc") : [file: "", failure: "未请求 API 索引"]
                             ]
                         }
                         configuration.incoming.resolutionResult.allDependencies.each { dependency ->
@@ -218,7 +247,8 @@ def compact_text(value: str, limit: int) -> str:
     return normalized[:limit] + ("…" if len(normalized) > limit else "")
 
 
-def run_gradle(project: Path, state_root: Path, explicit_home: str | None) -> dict[str, Any]:
+def run_gradle(project: Path, state_root: Path, explicit_home: str | None, include_api: bool) -> dict[str, Any]:
+    """实时转发 Gradle 日志，仅保留标记区间中的索引 JSON。"""
     homes = default_gradle_homes(explicit_home, state_root)
     environment = os.environ.copy()
     if homes:
@@ -226,20 +256,61 @@ def run_gradle(project: Path, state_root: Path, explicit_home: str | None) -> di
     with tempfile.TemporaryDirectory(prefix="pluginbase-agent-index-") as temporary:
         init_file = Path(temporary) / "dependency-index.init.gradle"
         init_file.write_text(INIT_SCRIPT, encoding="utf-8", newline="\n")
-        command = gradle_command(project, ["--no-daemon", "--console=plain", "--init-script", str(init_file), "pluginBaseAgentDependencyIndex"])
+        arguments = ["--no-daemon", "--console=plain", "--init-script", str(init_file)]
+        if not include_api:
+            arguments.append("-PpluginBaseAgentIncludeApi=false")
+        command = gradle_command(project, [*arguments, "pluginBaseAgentDependencyIndex"])
         try:
-            result = subprocess.run(command, cwd=project, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8", errors="replace", timeout=300, check=False)
+            process = subprocess.Popen(command, cwd=project, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8", errors="replace", bufsize=1)
         except OSError as error:
             raise IndexError(f"无法启动 Gradle Wrapper：{error}") from error
-        except subprocess.TimeoutExpired as error:
-            raise IndexError("Gradle 依赖解析超过 300 秒；请检查网络、仓库或配置。") from error
-    output = result.stdout or ""
-    start = output.find(MARKER_START)
-    end = output.find(MARKER_END, start + len(MARKER_START))
-    if start < 0 or end < 0:
-        raise IndexError(f"Gradle 未输出索引 JSON（退出码 {result.returncode}）：{compact_text(output, 800)}")
+        assert process.stdout is not None
+        lines: queue.Queue[str | None] = queue.Queue()
+
+        def read_output() -> None:
+            try:
+                for line in process.stdout:
+                    lines.put(line)
+            finally:
+                lines.put(None)
+
+        reader = threading.Thread(target=read_output, name="pluginbase-agent-gradle-output", daemon=True)
+        reader.start()
+        started = time.monotonic()
+        index_lines: list[str] = []
+        diagnostics: deque[str] = deque(maxlen=200)
+        in_index = False
+        while True:
+            remaining = 300 - (time.monotonic() - started)
+            if remaining <= 0:
+                process.kill()
+                process.wait()
+                raise IndexError("Gradle 依赖解析超过 300 秒；请检查网络、仓库或配置。")
+            try:
+                line = lines.get(timeout=min(1.0, remaining))
+            except queue.Empty:
+                continue
+            if line is None:
+                break
+            text = line.rstrip("\r\n")
+            if text == MARKER_START:
+                in_index = True
+                continue
+            if text == MARKER_END:
+                in_index = False
+                continue
+            if in_index:
+                index_lines.append(line)
+                continue
+            diagnostics.append(line)
+            if text:
+                print(f"[Gradle] {text}", flush=True)
+        process.wait()
+        reader.join(timeout=1)
+    if in_index or not index_lines:
+        raise IndexError(f"Gradle 未输出完整索引 JSON（退出码 {process.returncode}）：{compact_text(''.join(diagnostics), 800)}")
     try:
-        parsed = json.loads(output[start + len(MARKER_START):end].strip())
+        parsed = json.loads("".join(index_lines).strip())
     except json.JSONDecodeError as error:
         raise IndexError(f"Gradle 输出的索引 JSON 无效：{error}") from error
     if not isinstance(parsed, dict) or not isinstance(parsed.get("projects"), list):
@@ -281,40 +352,333 @@ def coordinate_text(row: sqlite3.Row) -> str:
     return row["file_name"] or "未知文件"
 
 
-def repositories_for(project_data: dict[str, Any]) -> list[str]:
-    values = [str(value).rstrip("/") + "/" for value in project_data.get("repositories", []) if str(value).startswith(("http://", "https://"))]
-    return list(dict.fromkeys([*values, *DEFAULT_REPOSITORIES]))
+class ArchiveHashCache:
+    """按归档路径、大小与修改时间复用 SHA-256，避免每次同步重读大型缓存归档。"""
+
+    def __init__(self, entries: dict[str, tuple[int, int, str]] | None = None):
+        self.entries = entries or {}
+
+    def digest(self, path: Path) -> str:
+        resolved = path.resolve()
+        key = str(resolved)
+        status = resolved.stat()
+        current = (status.st_size, status.st_mtime_ns)
+        cached = self.entries.get(key)
+        if cached and cached[:2] == current:
+            return cached[2]
+        digest = sha256(resolved)
+        self.entries[key] = (*current, digest)
+        return digest
+
+    def rows(self) -> Iterable[tuple[str, int, int, str]]:
+        return ((path, size, modified, digest) for path, (size, modified, digest) in self.entries.items())
 
 
-def reference_archive(classifier: str, coordinate: tuple[str, str, str], repositories: Iterable[str], homes: Iterable[Path]) -> tuple[Path, dict[str, str], Path | None] | None:
-    """优先原地读取 Gradle 缓存；远程构件仅使用临时文件。"""
-    group, artifact, version = coordinate
-    cached = find_cached_artifacts(homes, group, artifact, version, classifier)
-    if cached:
-        archive = cached[0]
-        return archive, {"sha256": sha256(archive), "origin": "gradle-cache", "source": str(archive), "resolvedVersion": version}, None
-    with tempfile.NamedTemporaryFile(prefix=f"pluginbase-agent-{classifier}-", suffix=".jar", delete=False) as temporary:
-        destination = Path(temporary.name)
+def load_archive_hashes(database: Path) -> ArchiveHashCache:
+    if not database.is_file():
+        return ArchiveHashCache()
     try:
-        url, resolved_version = download_artifact(repositories, group, artifact, version, classifier, destination)
-        return destination, {"sha256": sha256(destination), "origin": "maven", "source": url, "resolvedVersion": resolved_version}, destination
-    except EvidenceError:
-        destination.unlink(missing_ok=True)
+        connection = sqlite3.connect(database)
+        try:
+            rows = connection.execute("SELECT path, size, modified_ns, sha256 FROM archive_hashes").fetchall()
+        finally:
+            connection.close()
+    except sqlite3.Error:
+        return ArchiveHashCache()
+    return ArchiveHashCache({str(path): (int(size), int(modified), str(digest)) for path, size, modified, digest in rows})
+
+
+def reference_archive(raw: dict[str, Any], classifier: str, hashes: ArchiveHashCache) -> tuple[Path, dict[str, str]] | None:
+    """只读取目标项目 Gradle 已解析的资料归档；索引器绝不自行联网下载。"""
+    value = raw.get(classifier)
+    if not isinstance(value, dict):
         return None
+    archive = native_path(str(value.get("file", "")))
+    if not archive.is_file():
+        return None
+    return archive, {"sha256": hashes.digest(archive), "origin": "gradle", "source": str(archive), "resolvedVersion": str(raw.get("version", ""))}
 
 
-def iter_class_names(archive: Path) -> Iterator[tuple[str, str]]:
+def is_indexable_class_entry(entry: zipfile.ZipInfo) -> bool:
+    name = entry.filename
+    if entry.is_dir() or not name.endswith(".class") or name.startswith("META-INF/") or name.endswith("module-info.class"):
+        return False
+    binary = name[:-6].replace("/", ".")
+    return not binary.rsplit(".", 1)[-1].isdigit()
+
+
+def insert_class_names(connection: sqlite3.Connection, archive: Path, identifier: str, progress_prefix: str) -> None:
+    """分批写入类名；FTS 在全部构件写完后从 classes 一次性重建。"""
     try:
         with zipfile.ZipFile(archive) as source:
-            for entry in source.namelist():
-                if not entry.endswith(".class") or entry.startswith("META-INF/") or entry.endswith("module-info.class"):
+            entries = source.infolist()
+            total = sum(1 for entry in entries if is_indexable_class_entry(entry))
+            if not total:
+                print(f"{progress_prefix}类名 0/0", flush=True)
+                return
+            batch: list[tuple[str, str, str]] = []
+            processed = 0
+            for entry in entries:
+                if not is_indexable_class_entry(entry):
                     continue
-                binary = entry[:-6].replace("/", ".")
-                if binary.rsplit(".", 1)[-1].isdigit():
+                binary = entry.filename[:-6].replace("/", ".")
+                batch.append((identifier, binary.replace("$", "."), binary))
+                if len(batch) < CLASS_INSERT_BATCH_SIZE:
                     continue
-                yield binary.replace("$", "."), binary
+                connection.executemany("INSERT INTO classes(artifact_id, name, binary_name) VALUES (?, ?, ?)", batch)
+                processed += len(batch)
+                print(f"{progress_prefix}类名 {processed}/{total}", flush=True)
+                batch.clear()
+            if batch:
+                connection.executemany("INSERT INTO classes(artifact_id, name, binary_name) VALUES (?, ?, ?)", batch)
+                processed += len(batch)
+                print(f"{progress_prefix}类名 {processed}/{total}", flush=True)
     except zipfile.BadZipFile:
-        return
+        print(f"{progress_prefix}类名归档无效，已跳过", flush=True)
+
+
+BYTECODE_PUBLIC = 0x0001
+BYTECODE_PRIVATE = 0x0002
+BYTECODE_PROTECTED = 0x0004
+BYTECODE_STATIC = 0x0008
+BYTECODE_FINAL = 0x0010
+BYTECODE_SYNCHRONIZED = 0x0020
+BYTECODE_INTERFACE = 0x0200
+BYTECODE_BRIDGE = 0x0040
+BYTECODE_VARARGS = 0x0080
+BYTECODE_NATIVE = 0x0100
+BYTECODE_ABSTRACT = 0x0400
+BYTECODE_SYNTHETIC = 0x1000
+BYTECODE_ANNOTATION = 0x2000
+BYTECODE_ENUM = 0x4000
+
+
+def bytecode_u1(data: bytes, offset: int) -> tuple[int, int]:
+    if offset >= len(data):
+        raise ValueError("意外结束的 class 文件")
+    return data[offset], offset + 1
+
+
+def bytecode_u2(data: bytes, offset: int) -> tuple[int, int]:
+    if offset + 2 > len(data):
+        raise ValueError("意外结束的 class 文件")
+    return struct.unpack_from(">H", data, offset)[0], offset + 2
+
+
+def bytecode_u4(data: bytes, offset: int) -> tuple[int, int]:
+    if offset + 4 > len(data):
+        raise ValueError("意外结束的 class 文件")
+    return struct.unpack_from(">I", data, offset)[0], offset + 4
+
+
+def bytecode_skip_attributes(data: bytes, offset: int) -> int:
+    count, offset = bytecode_u2(data, offset)
+    for _ in range(count):
+        _, offset = bytecode_u2(data, offset)
+        length, offset = bytecode_u4(data, offset)
+        offset += length
+        if offset > len(data):
+            raise ValueError("意外结束的 class 属性")
+    return offset
+
+
+def bytecode_constant_pool(data: bytes, offset: int) -> tuple[list[Any], int]:
+    count, offset = bytecode_u2(data, offset)
+    values: list[Any] = [None] * count
+    index = 1
+    while index < count:
+        tag, offset = bytecode_u1(data, offset)
+        if tag == 1:
+            length, offset = bytecode_u2(data, offset)
+            end = offset + length
+            if end > len(data):
+                raise ValueError("意外结束的 UTF-8 常量")
+            values[index] = (tag, data[offset:end].decode("utf-8", errors="replace"))
+            offset = end
+        elif tag in {3, 4}:
+            offset += 4
+            values[index] = (tag, None)
+        elif tag in {5, 6}:
+            offset += 8
+            values[index] = (tag, None)
+            index += 1
+        elif tag in {7, 8, 16, 19, 20}:
+            value, offset = bytecode_u2(data, offset)
+            values[index] = (tag, value)
+        elif tag in {9, 10, 11, 12, 17, 18}:
+            first, offset = bytecode_u2(data, offset)
+            second, offset = bytecode_u2(data, offset)
+            values[index] = (tag, first, second)
+        elif tag == 15:
+            kind, offset = bytecode_u1(data, offset)
+            reference, offset = bytecode_u2(data, offset)
+            values[index] = (tag, kind, reference)
+        else:
+            raise ValueError(f"不支持的常量池标签：{tag}")
+        if offset > len(data):
+            raise ValueError("意外结束的常量池")
+        index += 1
+    return values, offset
+
+
+def bytecode_utf8(pool: list[Any], index: int) -> str:
+    value = pool[index] if 0 < index < len(pool) else None
+    return str(value[1]) if value and value[0] == 1 else ""
+
+
+def bytecode_class_name(pool: list[Any], index: int) -> str:
+    value = pool[index] if 0 < index < len(pool) else None
+    return bytecode_utf8(pool, int(value[1])).replace("/", ".").replace("$", ".") if value and value[0] == 7 else ""
+
+
+def bytecode_type(descriptor: str, offset: int = 0) -> tuple[str, int]:
+    primitives = {"B": "byte", "C": "char", "D": "double", "F": "float", "I": "int", "J": "long", "S": "short", "Z": "boolean", "V": "void"}
+    arrays = 0
+    while offset < len(descriptor) and descriptor[offset] == "[":
+        arrays += 1
+        offset += 1
+    if offset >= len(descriptor):
+        raise ValueError("无效的类型描述符")
+    marker = descriptor[offset]
+    if marker == "L":
+        end = descriptor.find(";", offset)
+        if end < 0:
+            raise ValueError("无效的对象描述符")
+        value = descriptor[offset + 1:end].replace("/", ".").replace("$", ".")
+        offset = end + 1
+    elif marker in primitives:
+        value = primitives[marker]
+        offset += 1
+    else:
+        raise ValueError("未知的类型描述符")
+    return value + "[]" * arrays, offset
+
+
+def bytecode_method_types(descriptor: str) -> tuple[list[str], str]:
+    if not descriptor.startswith("("):
+        raise ValueError("无效的方法描述符")
+    offset = 1
+    arguments: list[str] = []
+    while offset < len(descriptor) and descriptor[offset] != ")":
+        value, offset = bytecode_type(descriptor, offset)
+        arguments.append(value)
+    if offset >= len(descriptor):
+        raise ValueError("无效的方法描述符")
+    result, offset = bytecode_type(descriptor, offset + 1)
+    if offset != len(descriptor):
+        raise ValueError("无效的方法描述符尾部")
+    return arguments, result
+
+
+def bytecode_modifiers(access: int, member: bool = False) -> str:
+    values = []
+    if access & BYTECODE_PUBLIC:
+        values.append("public")
+    elif access & BYTECODE_PROTECTED:
+        values.append("protected")
+    elif access & BYTECODE_PRIVATE:
+        values.append("private")
+    if access & BYTECODE_STATIC:
+        values.append("static")
+    if access & BYTECODE_FINAL:
+        values.append("final")
+    if member and access & BYTECODE_ABSTRACT:
+        values.append("abstract")
+    if member and access & BYTECODE_NATIVE:
+        values.append("native")
+    if member and access & BYTECODE_SYNCHRONIZED:
+        values.append("synchronized")
+    return " ".join(values)
+
+
+def bytecode_member_records(data: bytes, entry_name: str) -> list[dict[str, Any]]:
+    """从单个 class 文件提取可见类型、字段、方法与直接继承关系。"""
+    if len(data) < 10 or data[:4] != b"\xca\xfe\xba\xbe":
+        return []
+    try:
+        offset = 8
+        pool, offset = bytecode_constant_pool(data, offset)
+        access, offset = bytecode_u2(data, offset)
+        this_class, offset = bytecode_u2(data, offset)
+        super_class, offset = bytecode_u2(data, offset)
+        owner = bytecode_class_name(pool, this_class)
+        if not owner or not (access & BYTECODE_PUBLIC) or access & BYTECODE_SYNTHETIC:
+            return []
+        interfaces_count, offset = bytecode_u2(data, offset)
+        interfaces = []
+        for _ in range(interfaces_count):
+            interface, offset = bytecode_u2(data, offset)
+            resolved = bytecode_class_name(pool, interface)
+            if resolved:
+                interfaces.append(resolved)
+        supertypes = [value for value in [bytecode_class_name(pool, super_class), *interfaces] if value]
+        simple_name = owner.rsplit(".", 1)[-1]
+        if access & BYTECODE_ANNOTATION:
+            type_kind = "@interface"
+        elif access & BYTECODE_INTERFACE:
+            type_kind = "interface"
+        elif access & BYTECODE_ENUM:
+            type_kind = "enum"
+        else:
+            type_kind = "class"
+        source = "bytecode:" + entry_name
+        type_modifiers = bytecode_modifiers(access)
+        records: list[dict[str, Any]] = [{"kind": "type", "owner": owner, "name": simple_name, "declaration": f"{type_modifiers} {type_kind} {simple_name}".strip(), "source": source, "line": 0, "supertypes": supertypes, "javadoc": None, "documentation": None}]
+        fields_count, offset = bytecode_u2(data, offset)
+        for _ in range(fields_count):
+            field_access, offset = bytecode_u2(data, offset)
+            name_index, offset = bytecode_u2(data, offset)
+            descriptor_index, offset = bytecode_u2(data, offset)
+            offset = bytecode_skip_attributes(data, offset)
+            if not field_access & BYTECODE_PUBLIC or field_access & BYTECODE_SYNTHETIC:
+                continue
+            field_name = bytecode_utf8(pool, name_index)
+            try:
+                field_type, _ = bytecode_type(bytecode_utf8(pool, descriptor_index))
+            except ValueError:
+                continue
+            records.append({"kind": "field", "owner": owner, "name": field_name, "declaration": f"{bytecode_modifiers(field_access, True)} {field_type} {field_name}".strip(), "source": source, "line": 0, "supertypes": [], "javadoc": None, "documentation": None})
+        methods_count, offset = bytecode_u2(data, offset)
+        for _ in range(methods_count):
+            method_access, offset = bytecode_u2(data, offset)
+            name_index, offset = bytecode_u2(data, offset)
+            descriptor_index, offset = bytecode_u2(data, offset)
+            offset = bytecode_skip_attributes(data, offset)
+            if not method_access & BYTECODE_PUBLIC or method_access & (BYTECODE_SYNTHETIC | BYTECODE_BRIDGE):
+                continue
+            method_name = bytecode_utf8(pool, name_index)
+            if method_name == "<clinit>":
+                continue
+            try:
+                arguments, result = bytecode_method_types(bytecode_utf8(pool, descriptor_index))
+            except ValueError:
+                continue
+            parameters = ", ".join(arguments)
+            if method_name == "<init>":
+                kind, name, declaration = "constructor", simple_name, f"{bytecode_modifiers(method_access, True)} {simple_name}({parameters})".strip()
+            else:
+                kind, name, declaration = "method", method_name, f"{bytecode_modifiers(method_access, True)} {result} {method_name}({parameters})".strip()
+            records.append({"kind": kind, "owner": owner, "name": name, "declaration": declaration, "source": source, "line": 0, "supertypes": [], "javadoc": None, "documentation": None})
+        return records
+    except (IndexError, ValueError, struct.error):
+        return []
+
+
+def iter_bytecode_api(archive: Path, progress_prefix: str) -> Iterator[dict[str, Any]]:
+    """从缺失源码的二进制 JAR 流式提取可见 API；不加载或执行任何类。"""
+    try:
+        with zipfile.ZipFile(archive) as source:
+            entries = [entry for entry in source.infolist() if is_indexable_class_entry(entry)]
+            total = len(entries)
+            if not total:
+                print(f"{progress_prefix}字节码结构 0/0", flush=True)
+                return
+            for processed, entry in enumerate(entries, start=1):
+                if processed == 1 or processed % 200 == 0 or processed == total:
+                    print(f"{progress_prefix}字节码结构 {processed}/{total}", flush=True)
+                yield from bytecode_member_records(source.read(entry), entry.filename)
+    except zipfile.BadZipFile:
+        print(f"{progress_prefix}字节码归档无效，已跳过", flush=True)
 
 
 def strip_java_comments(line: str, in_block: bool) -> tuple[str, bool]:
@@ -402,6 +766,20 @@ def html_text(value: str) -> str:
     return compact_text(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", value)).strip(), 420)
 
 
+def javadoc_member_summaries(document: str, names: set[str]) -> dict[str, str]:
+    """单次扫描类型页面，避免为每个公开成员重复搜索完整 Javadoc HTML。"""
+    result: dict[str, str] = {}
+    for match in re.finditer(r'id="([^"]+)"', document, flags=re.IGNORECASE):
+        identifier = match.group(1)
+        name = re.split(r"[(:]", identifier, maxsplit=1)[0]
+        if name not in names or name in result:
+            continue
+        block = re.search(r'<div class="block">(.*?)</div>', document[match.end():], flags=re.IGNORECASE | re.DOTALL)
+        if block:
+            result[name] = html_text(block.group(1))
+    return result
+
+
 def add_javadoc_summaries(records: list[dict[str, Any]], source: zipfile.ZipFile) -> None:
     by_owner: dict[str, list[dict[str, Any]]] = {}
     for record in records:
@@ -414,15 +792,13 @@ def add_javadoc_summaries(records: list[dict[str, Any]], source: zipfile.ZipFile
             continue
         blocks = re.findall(r'<div class="block">(.*?)</div>', document, flags=re.IGNORECASE | re.DOTALL)
         summary = html_text(blocks[0]) if blocks else ""
+        member_summaries = javadoc_member_summaries(document, {str(record["name"]) for record in owner_records if record["kind"] != "type"})
         for record in owner_records:
             record["javadoc"] = path
             if record["kind"] == "type":
                 record["documentation"] = summary or None
                 continue
-            name = re.escape(str(record["name"]))
-            found = re.search(rf'id="[^"]*{name}[^"]*".*?<div class="block">(.*?)</div>', document, flags=re.IGNORECASE | re.DOTALL)
-            if found:
-                record["documentation"] = html_text(found.group(1)) or None
+            record["documentation"] = member_summaries.get(str(record["name"])) or None
 
 
 def iter_public_api(source_archive: Path, javadoc_archive: Path | None, progress_prefix: str) -> Iterator[dict[str, Any]]:
@@ -485,13 +861,14 @@ def create_schema(connection: sqlite3.Connection) -> None:
         CREATE TABLE classes (id INTEGER PRIMARY KEY, artifact_id TEXT NOT NULL, name TEXT NOT NULL, binary_name TEXT NOT NULL);
         CREATE TABLE api (id INTEGER PRIMARY KEY, artifact_id TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, name TEXT NOT NULL, declaration TEXT NOT NULL, source_path TEXT NOT NULL, source_line INTEGER NOT NULL, javadoc_path TEXT, documentation TEXT);
         CREATE TABLE type_edges (child_owner TEXT NOT NULL, parent_owner TEXT NOT NULL, PRIMARY KEY(child_owner, parent_owner));
+        CREATE TABLE archive_hashes (path TEXT PRIMARY KEY, size INTEGER NOT NULL, modified_ns INTEGER NOT NULL, sha256 TEXT NOT NULL);
         CREATE INDEX classes_artifact_idx ON classes(artifact_id);
         CREATE INDEX api_owner_idx ON api(owner);
         CREATE INDEX api_artifact_idx ON api(artifact_id);
         CREATE INDEX edges_parent_idx ON type_edges(parent_owner);
         CREATE INDEX configurations_module_idx ON configurations(module_path);
-        CREATE VIRTUAL TABLE class_search USING fts5(name, binary_name, artifact_id UNINDEXED, class_id UNINDEXED, tokenize='unicode61', prefix='2 3 4');
-        CREATE VIRTUAL TABLE api_search USING fts5(owner, name, declaration, documentation, api_id UNINDEXED, tokenize='unicode61', prefix='2 3 4');
+        CREATE VIRTUAL TABLE class_search USING fts5(name, binary_name, content='classes', content_rowid='id', tokenize='unicode61', prefix='2 3 4');
+        CREATE VIRTUAL TABLE api_search USING fts5(owner, name, declaration, documentation, content='api', content_rowid='id', tokenize='unicode61', prefix='2 3 4');
     """)
 
 
@@ -506,14 +883,38 @@ def fts_query(query: str) -> str:
     return " AND ".join(f'"{term.replace("\"", "")}"*' for term in terms)
 
 
-def artifact_id(raw: dict[str, Any]) -> str:
+def artifact_id(raw: dict[str, Any], hashes: ArchiveHashCache | None = None) -> str:
     path = native_path(str(raw.get("file", "")))
-    return sha256(path) if path.is_file() else "missing:" + re.sub(r"[^A-Za-z0-9_.-]+", "_", str(path))
+    return (hashes.digest(path) if hashes else sha256(path)) if path.is_file() else "missing:" + re.sub(r"[^A-Za-z0-9_.-]+", "_", str(path))
 
 
-def insert_artifact(connection: sqlite3.Connection, raw: dict[str, Any], homes: list[Path], repositories: list[str], include_api: bool, position: int, total: int) -> None:
+def insert_public_api(connection: sqlite3.Connection, records: Iterable[dict[str, Any]], identifier: str) -> None:
+    """分批写入公开 API 与继承边；FTS 在全部构件完成后统一重建。"""
+    api_batch: list[tuple[Any, ...]] = []
+    edge_batch: list[tuple[str, str]] = []
+
+    def flush() -> None:
+        if api_batch:
+            connection.executemany(
+                "INSERT INTO api(artifact_id, kind, owner, name, declaration, source_path, source_line, javadoc_path, documentation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                api_batch,
+            )
+            api_batch.clear()
+        if edge_batch:
+            connection.executemany("INSERT OR IGNORE INTO type_edges(child_owner, parent_owner) VALUES (?, ?)", edge_batch)
+            edge_batch.clear()
+
+    for record in records:
+        api_batch.append((identifier, record["kind"], record["owner"], record["name"], record["declaration"], record["source"], record["line"], record["javadoc"], record["documentation"]))
+        if record["kind"] == "type":
+            edge_batch.extend((record["owner"], parent) for parent in record["supertypes"])
+        if len(api_batch) >= API_INSERT_BATCH_SIZE:
+            flush()
+    flush()
+
+
+def insert_artifact(connection: sqlite3.Connection, raw: dict[str, Any], identifier: str, artifact_sha256: str | None, hashes: ArchiveHashCache, include_api: bool, position: int, total: int) -> None:
     path = native_path(str(raw.get("file", "")))
-    identifier = artifact_id(raw)
     if not path.is_file():
         connection.execute("INSERT INTO artifacts(id, file_name, file_path, api_status) VALUES (?, ?, ?, ?)", (identifier, path.name, str(path), "missing"))
         return
@@ -521,33 +922,26 @@ def insert_artifact(connection: sqlite3.Connection, raw: dict[str, Any], homes: 
     label = ":".join(coordinate) if coordinate else path.name
     prefix = f"[3/4] 构件 {position}/{total} {label}："
     print(prefix + "扫描类名", flush=True)
-    source_reference = reference_archive("sources", coordinate, repositories, homes) if coordinate and include_api else None
-    javadoc_reference = reference_archive("javadoc", coordinate, repositories, homes) if coordinate and include_api else None
+    insert_class_names(connection, path, identifier, prefix)
+    if coordinate and include_api:
+        print(prefix + "读取 Gradle 已解析的 sources 与 Javadoc 归档", flush=True)
+    source_reference = reference_archive(raw, "sources", hashes) if include_api else None
+    javadoc_reference = reference_archive(raw, "javadoc", hashes) if include_api else None
     sources_info = source_reference[1] if source_reference else None
     javadoc_info = javadoc_reference[1] if javadoc_reference else None
-    api_status = "not-requested" if not include_api else ("sources" if source_reference and javadoc_reference else "sources-only" if source_reference else "javadoc-only" if javadoc_reference else "unavailable")
+    api_status = "not-requested" if not include_api else ("sources" if source_reference and javadoc_reference else "sources-only" if source_reference else "bytecode-with-javadoc" if javadoc_reference else "bytecode")
     connection.execute("""
         INSERT INTO artifacts(id, group_name, artifact_name, version, classifier, extension, file_name, file_path, sha256, sources_sha256, sources_origin, sources_source, javadoc_sha256, javadoc_origin, javadoc_source, api_status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (identifier, *(coordinate or (None, None, None)), str(raw.get("classifier", "")), str(raw.get("extension", "")), path.name, str(path), sha256(path), *(sources_info[key] if sources_info else None for key in ("sha256", "origin", "source")), *(javadoc_info[key] if javadoc_info else None for key in ("sha256", "origin", "source")), api_status))
-    for name, binary in iter_class_names(path):
-        cursor = connection.execute("INSERT INTO classes(artifact_id, name, binary_name) VALUES (?, ?, ?)", (identifier, name, binary))
-        connection.execute("INSERT INTO class_search(name, binary_name, artifact_id, class_id) VALUES (?, ?, ?, ?)", (name, binary, identifier, cursor.lastrowid))
+    """, (identifier, *(coordinate or (None, None, None)), str(raw.get("classifier", "")), str(raw.get("extension", "")), path.name, str(path), artifact_sha256, *(sources_info[key] if sources_info else None for key in ("sha256", "origin", "source")), *(javadoc_info[key] if javadoc_info else None for key in ("sha256", "origin", "source")), api_status))
     if source_reference:
-        source_archive, _, source_temporary = source_reference
+        source_archive, _ = source_reference
         javadoc_archive = javadoc_reference[0] if javadoc_reference else None
         print(prefix + ("读取 sources 与 Javadoc 摘要" if javadoc_archive else "读取 sources"), flush=True)
-        try:
-            for record in iter_public_api(source_archive, javadoc_archive, prefix):
-                cursor = connection.execute("INSERT INTO api(artifact_id, kind, owner, name, declaration, source_path, source_line, javadoc_path, documentation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (identifier, record["kind"], record["owner"], record["name"], record["declaration"], record["source"], record["line"], record["javadoc"], record["documentation"]))
-                connection.execute("INSERT INTO api_search(owner, name, declaration, documentation, api_id) VALUES (?, ?, ?, ?, ?)", (record["owner"], record["name"], record["declaration"], record["documentation"] or "", cursor.lastrowid))
-                if record["kind"] == "type":
-                    connection.executemany("INSERT OR IGNORE INTO type_edges(child_owner, parent_owner) VALUES (?, ?)", ((record["owner"], parent) for parent in record["supertypes"]))
-        finally:
-            if source_temporary:
-                source_temporary.unlink(missing_ok=True)
-    if javadoc_reference and javadoc_reference[2]:
-        javadoc_reference[2].unlink(missing_ok=True)
+        insert_public_api(connection, iter_public_api(source_archive, javadoc_archive, prefix), identifier)
+    elif include_api:
+        print(prefix + "读取字节码结构", flush=True)
+        insert_public_api(connection, iter_bytecode_api(path, prefix), identifier)
 
 
 def remove_legacy_index_state(state_root: Path) -> None:
@@ -566,14 +960,13 @@ def build_database(arguments: argparse.Namespace, database: Path) -> None:
     project = normalize_project(arguments.project)
     state_root = arguments.state.resolve()
     print("[1/4] 正在由项目 Gradle Wrapper 解析模块和依赖…", flush=True)
-    raw = selected_configurations(run_gradle(project, state_root, arguments.gradle_user_home), arguments.configuration)
-    homes = default_gradle_homes(arguments.gradle_user_home, state_root)
-    unique: dict[str, tuple[dict[str, Any], list[str]]] = {}
+    raw = selected_configurations(run_gradle(project, state_root, arguments.gradle_user_home, not arguments.no_api), arguments.configuration)
+    archive_hashes = load_archive_hashes(database)
+    unique: dict[str, dict[str, Any]] = {}
     for project_data in raw["projects"]:
-        repositories = repositories_for(project_data)
         for config in project_data.get("configurations", []):
             for artifact in config.get("artifacts", []):
-                unique.setdefault(artifact_id(artifact), (artifact, repositories))
+                unique.setdefault(artifact_id(artifact, archive_hashes), artifact)
     print(f"[2/4] 已发现 {len(raw['projects'])} 个模块、{len(unique)} 个唯一构件；开始流式建立 SQLite 索引…", flush=True)
     remove_legacy_index_state(state_root)
     temporary = database.with_suffix(database.suffix + ".tmp")
@@ -592,10 +985,12 @@ def build_database(arguments: argparse.Namespace, database: Path) -> None:
                 for failure in config.get("failures", []):
                     connection.execute("INSERT INTO dependencies(configuration_id, kind, requested, selected, failure) VALUES (?, 'failed', '', '', ?)", (config_id, compact_text(str(failure), 500)))
                 for artifact in config.get("artifacts", []):
-                    identifier = artifact_id(artifact)
+                    identifier = artifact_id(artifact, archive_hashes)
                     if connection.execute("SELECT 1 FROM artifacts WHERE id = ?", (identifier,)).fetchone() is None:
-                        raw_artifact, repositories = unique[identifier]
-                        insert_artifact(connection, raw_artifact, homes, repositories, not arguments.no_api, connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0] + 1, len(unique))
+                        raw_artifact = unique[identifier]
+                        artifact_path = native_path(str(raw_artifact.get("file", "")))
+                        artifact_sha256 = archive_hashes.digest(artifact_path) if artifact_path.is_file() else None
+                        insert_artifact(connection, raw_artifact, identifier, artifact_sha256, archive_hashes, not arguments.no_api, connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0] + 1, len(unique))
                     connection.execute("INSERT OR IGNORE INTO configuration_artifacts(configuration_id, artifact_id) VALUES (?, ?)", (config_id, identifier))
         current_fingerprint = fingerprint(project)
         metadata_entries = {
@@ -604,7 +999,10 @@ def build_database(arguments: argparse.Namespace, database: Path) -> None:
             "gradleVersion": str(raw.get("gradleVersion", "")), "createdAtEpoch": str(int(time.time())),
         }
         connection.executemany("INSERT INTO metadata(key, value) VALUES (?, ?)", metadata_entries.items())
-        print("[4/4] 正在完成 SQLite 索引写入…", flush=True)
+        connection.executemany("INSERT INTO archive_hashes(path, size, modified_ns, sha256) VALUES (?, ?, ?, ?)", archive_hashes.rows())
+        print("[4/4] 正在建立类名与公开 API 全文索引并完成 SQLite 写入…", flush=True)
+        connection.execute("INSERT INTO class_search(class_search) VALUES ('rebuild')")
+        connection.execute("INSERT INTO api_search(api_search) VALUES ('rebuild')")
         connection.commit()
     except BaseException:
         connection.rollback()
@@ -657,11 +1055,11 @@ def command_sync(arguments: argparse.Namespace) -> int:
     connection = load_database(arguments)
     try:
         counts = {name: connection.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0] for name in ("modules", "configurations", "artifacts", "classes", "api")}
-        missing = connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status IN ('unavailable', 'javadoc-only')").fetchone()[0]
+        bytecode = connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status IN ('bytecode', 'bytecode-with-javadoc')").fetchone()[0]
         failed = connection.execute("SELECT COUNT(*) FROM configurations WHERE status != 'ok'").fetchone()[0]
     finally:
         connection.close()
-    print(f"已同步：模块 {counts['modules']}，配置 {counts['configurations']}，构件 {counts['artifacts']}，类 {counts['classes']}，公开签名 {counts['api']}，资料缺失 {missing}，失败 {failed}")
+    print(f"已同步：模块 {counts['modules']}，配置 {counts['configurations']}，构件 {counts['artifacts']}，类 {counts['classes']}，公开签名 {counts['api']}，字节码回退 {bytecode}，失败 {failed}")
     return 0
 
 
@@ -669,10 +1067,10 @@ def command_status(arguments: argparse.Namespace) -> int:
     connection = load_database(arguments)
     try:
         reason = stale_reason(connection, normalize_project(arguments.project))
-        data = {"status": "stale" if reason else "ready", "reason": reason, "modules": connection.execute("SELECT COUNT(*) FROM modules").fetchone()[0], "artifacts": connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0], "classes": connection.execute("SELECT COUNT(*) FROM classes").fetchone()[0], "members": connection.execute("SELECT COUNT(*) FROM api").fetchone()[0], "withoutSources": connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status NOT IN ('sources', 'sources-only')").fetchone()[0]}
+        data = {"status": "stale" if reason else "ready", "reason": reason, "modules": connection.execute("SELECT COUNT(*) FROM modules").fetchone()[0], "artifacts": connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0], "classes": connection.execute("SELECT COUNT(*) FROM classes").fetchone()[0], "members": connection.execute("SELECT COUNT(*) FROM api").fetchone()[0], "withoutSources": connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status NOT IN ('sources', 'sources-only')").fetchone()[0], "bytecodeFallback": connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status IN ('bytecode', 'bytecode-with-javadoc')").fetchone()[0]}
     finally:
         connection.close()
-    print(json.dumps(data, ensure_ascii=False, separators=(",", ":")) if arguments.json else f"SQLite 索引 {data['status']}：模块 {data['modules']}，构件 {data['artifacts']}，类 {data['classes']}，公开签名 {data['members']}，无源码资料 {data['withoutSources']}{'；' + reason if reason else ''}")
+    print(json.dumps(data, ensure_ascii=False, separators=(",", ":")) if arguments.json else f"SQLite 索引 {data['status']}：模块 {data['modules']}，构件 {data['artifacts']}，类 {data['classes']}，公开签名 {data['members']}，无源码资料 {data['withoutSources']}，字节码回退 {data['bytecodeFallback']}{'；' + reason if reason else ''}")
     return 1 if reason else 0
 
 
@@ -719,7 +1117,7 @@ def command_classes(arguments: argparse.Namespace) -> int:
         limit, offset = clamp(arguments)
         search = fts_query(arguments.query)
         total = connection.execute("SELECT COUNT(*) FROM class_search WHERE class_search MATCH ?", (search,)).fetchone()[0]
-        rows = connection.execute("SELECT c.name, c.binary_name, a.group_name, a.artifact_name, a.version FROM class_search s JOIN classes c ON c.id=s.class_id JOIN artifacts a ON a.id=c.artifact_id WHERE class_search MATCH ? ORDER BY c.name LIMIT ? OFFSET ?", (search, limit, offset)).fetchall()
+        rows = connection.execute("SELECT c.name, c.binary_name, a.group_name, a.artifact_name, a.version FROM class_search s JOIN classes c ON c.id=s.rowid JOIN artifacts a ON a.id=c.artifact_id WHERE class_search MATCH ? ORDER BY c.name LIMIT ? OFFSET ?", (search, limit, offset)).fetchall()
         items = []
         for row in rows:
             gav = f"{row['group_name']}:{row['artifact_name']}:{row['version']}" if row['group_name'] else "未知构件"
@@ -762,12 +1160,12 @@ def command_members(arguments: argparse.Namespace) -> int:
             raise IndexError(f"索引中未找到类型：{arguments.type_name}")
         if visible is None:
             total = connection.execute("SELECT COUNT(*) FROM api_search WHERE api_search MATCH ?", (search,)).fetchone()[0]
-            rows = connection.execute("SELECT a.*, r.group_name, r.artifact_name, r.version FROM api_search s JOIN api a ON a.id=s.api_id JOIN artifacts r ON r.id=a.artifact_id WHERE api_search MATCH ? ORDER BY a.owner, a.declaration LIMIT ? OFFSET ?", (search, limit, offset)).fetchall()
+            rows = connection.execute("SELECT a.*, r.group_name, r.artifact_name, r.version FROM api_search s JOIN api a ON a.id=s.rowid JOIN artifacts r ON r.id=a.artifact_id WHERE api_search MATCH ? ORDER BY a.owner, a.declaration LIMIT ? OFFSET ?", (search, limit, offset)).fetchall()
         else:
             placeholders = ",".join("?" for _ in visible)
             values = [search, *visible.keys()]
-            total = connection.execute(f"SELECT COUNT(*) FROM api_search s JOIN api a ON a.id=s.api_id WHERE api_search MATCH ? AND a.owner IN ({placeholders})", values).fetchone()[0]
-            rows = connection.execute(f"SELECT a.*, r.group_name, r.artifact_name, r.version FROM api_search s JOIN api a ON a.id=s.api_id JOIN artifacts r ON r.id=a.artifact_id WHERE api_search MATCH ? AND a.owner IN ({placeholders}) ORDER BY a.owner, a.declaration LIMIT ? OFFSET ?", (*values, limit, offset)).fetchall()
+            total = connection.execute(f"SELECT COUNT(*) FROM api_search s JOIN api a ON a.id=s.rowid WHERE api_search MATCH ? AND a.owner IN ({placeholders})", values).fetchone()[0]
+            rows = connection.execute(f"SELECT a.*, r.group_name, r.artifact_name, r.version FROM api_search s JOIN api a ON a.id=s.rowid JOIN artifacts r ON r.id=a.artifact_id WHERE api_search MATCH ? AND a.owner IN ({placeholders}) ORDER BY a.owner, a.declaration LIMIT ? OFFSET ?", (*values, limit, offset)).fetchall()
         items = []
         for row in rows:
             gav = f"{row['group_name']}:{row['artifact_name']}:{row['version']}" if row['group_name'] else "未知构件"

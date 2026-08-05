@@ -126,8 +126,9 @@ def request_bytes(url: str, timeout: int = 30) -> bytes:
     try:
         with urllib.request.urlopen(request, timeout=timeout) as response:
             return response.read()
-    except urllib.error.URLError as error:
-        raise EvidenceError(f"下载失败：{url}：{error.reason}") from error
+    except (urllib.error.URLError, TimeoutError, OSError) as error:
+        reason = getattr(error, "reason", None) or str(error) or error.__class__.__name__
+        raise EvidenceError(f"下载失败：{url}：{reason}") from error
 
 
 def parse_snapshot_value(metadata: bytes, version: str, classifier: str, extension: str) -> str | None:
