@@ -24,13 +24,14 @@ description: Guides development, maintenance, review, and version upgrades of Gr
 
 1. 原样记录用户指定的 Minecraft 版本；不得将 `1.21.11` 改为 `1.21.1`，不得把 `26.2` 改为旧式版本格式。若对版本命名有疑问，按 `agent-dev/docs/server-api/minecraft-version-integrity.md` 使用原样版本号查询 Wiki。
 2. 默认选择 Spigot API。只有用户明确选择 Paper，或目标项目已验证需要 Paper 专有能力时才进入 Paper 路径；PluginBase 的 `paper` 模块用于 Spigot/Paper 双端物品/库存工厂回退，不等于可直接调用 Paper API。
-3. 在使用版本敏感的 Bukkit、Spigot、Paper、PluginBase、外部插件或 NMS 符号前，先运行项目内资料工具并记录证据：
+3. 初始化或查询 PluginBase 资料时，读取 `build.gradle.kts` 中 `top.mrxiaom:LibrariesResolver-Gradle` 的精确版本；它是全部 PluginBase 模块的统一版本锚点。从 `pluginBaseModules` 识别实际启用模块，并只用该统一版本同步这些模块。不得逐个猜测、探测或预先获取未启用模块的版本。
+4. 在使用版本敏感的 Bukkit、Spigot、Paper、PluginBase、外部插件或 NMS 符号前，先运行项目内资料工具并记录证据：
    - `python agent-dev/tools/api_evidence.py sync/query ...`
    - `python agent-dev/tools/pluginbase_evidence.py sync/query ...`
-4. 无法取得资料或查询不到符号时，停止猜测，报告已尝试来源与阻塞项；不得编造 API、反射字符串或近似版本。
-5. 使用 PluginBase 时：继承 `BukkitPlugin`，不覆写 `onLoad()`、`onEnable()`、`onDisable()`；将框架打入 Shadow JAR 并重定位；保持 `scanIgnore` 与 `shadowGroup` 一致；保留 `META-INF/PluginBaseHolders` 合并。
-6. 解析 Bukkit 枚举或注册表类型时使用 `Util.valueOr(...)`、`Util.valueOrNull(...)` 或对应 `Util.parse*` 方法；不要使用 `Enum.valueOf(...)` 或 `Material.valueOf(...)`。
-7. 修改后执行 `python agent-dev/tools/verify_plugin_project.py --project .`、项目 Gradle Wrapper 构建，并按 `agent-dev/docs/quality/build-and-artifact-checklist.md` 审查最终 JAR。
+5. 无法取得资料或查询不到符号时，停止猜测，报告已尝试来源与阻塞项；不得编造 API、反射字符串或近似版本。
+6. 使用 PluginBase 时：继承 `BukkitPlugin`，不覆写 `onLoad()`、`onEnable()`、`onDisable()`；将框架打入 Shadow JAR 并重定位；保持 `scanIgnore` 与 `shadowGroup` 一致；保留 `META-INF/PluginBaseHolders` 合并。
+7. 解析 Bukkit 枚举或注册表类型时使用 `Util.valueOr(...)`、`Util.valueOrNull(...)` 或对应 `Util.parse*` 方法；不要使用 `Enum.valueOf(...)` 或 `Material.valueOf(...)`。
+8. 修改后执行 `python agent-dev/tools/verify_plugin_project.py --project .`、项目 Gradle Wrapper 构建，并按 `agent-dev/docs/quality/build-and-artifact-checklist.md` 审查最终 JAR。
 
 ## 文档导航
 

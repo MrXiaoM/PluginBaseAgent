@@ -9,8 +9,9 @@
 1. 目标 Minecraft 版本及最低兼容版本；用户明确给出的版本号必须逐字保留，不得因知识库、旧版命名模式或资料查询失败而擅自改写。
 2. 服务器 API 选择：未特别指定时为 **Spigot**；Paper 必须由用户明确选择，或由已验证的需求证明不可替代。
 3. 是否允许 NMS、CraftBukkit 或版本包代码；未明确允许时，按不允许处理。
-4. `build.gradle.kts` 中现有的 API 坐标、`PluginBase` 模块、可选依赖、Java 目标版本和 Shadow 配置。
-5. 功能是否需要配置、数据库、GUI、Action、命令、富文本、调度、BungeeCord、动态库或外部插件兼容。
+4. `build.gradle.kts` 中现有的 API 坐标、`top.mrxiaom:LibrariesResolver-Gradle` 精确版本、`PluginBase` 模块、可选依赖、Java 目标版本和 Shadow 配置。
+5. `LibrariesResolver-Gradle` 的精确版本是全部 PluginBase 模块的统一版本锚点；只从 `pluginBaseModules` 识别实际启用模块，并以该统一版本同步其资料，不得为未启用模块逐个猜测或探测版本。
+6. 功能是否需要配置、数据库、GUI、Action、命令、富文本、调度、BungeeCord、动态库或外部插件兼容。
 
 若这些事实影响实现而无法从用户需求和当前项目中确定，先提出最少必要的问题；不得擅自选用 Paper 或 NMS。对陌生或前沿的用户版本号，可按 `server-api/minecraft-version-integrity.md` 使用 Wiki 原样 URL 核验，但不得改写该输入。
 

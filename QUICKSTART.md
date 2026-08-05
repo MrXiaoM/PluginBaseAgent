@@ -62,7 +62,7 @@ python .opencode/skills/minecraft-pluginbase-development/scripts/install_kit.py 
 然后向已安装的 AI 工具发送一次以下提示词，完成项目资料环境初始化：
 
 ```text
-请读取本项目的 agent-dev/README.md 和 agent-dev/docs/01-agent-contract.md，检查 build.gradle.kts、plugin.yml 与当前 PluginBase 配置；以项目中声明的 Minecraft 版本原样同步所需的 Spigot 或 Paper API 资料，并同步当前 PluginBase 已使用模块的资料。不要修改项目代码或构建配置；完成后报告同步来源、精确构件版本、缓存位置和未能取得的资料。
+请读取本项目的 agent-dev/README.md 和 agent-dev/docs/01-agent-contract.md，检查 build.gradle.kts、plugin.yml 与当前 PluginBase 配置；将 build.gradle.kts 中 top.mrxiaom:LibrariesResolver-Gradle 的精确版本作为所有 PluginBase 模块的统一版本锚点，从 pluginBaseModules 收集实际启用的模块，仅同步这些模块的资料，不要逐个猜测或获取其它模块版本。以项目中声明的 Minecraft 版本原样同步所需的 Spigot 或 Paper API 资料。不要修改项目代码或构建配置；完成后报告 API 与 PluginBase 的精确构件版本、已同步模块、同步来源、缓存位置和未能取得的资料。
 ```
 
 发送前，请先在项目配置或提示词中明确目标 Minecraft 版本；用户指定的版本必须原样保留，不能自行改写。首次涉及版本敏感 API 或 PluginBase 符号时，AI 仍会先用 `agent-dev/tools/` 查询已同步资料。
