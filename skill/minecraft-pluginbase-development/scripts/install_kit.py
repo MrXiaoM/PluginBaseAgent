@@ -173,20 +173,46 @@ def installed_from_roo_skill() -> bool:
     return SCRIPT_ROOT.parent.parent.parent.name == ".roo"
 
 
+ZOO_ZOD_VERSION = "3.25.76"
+
+
+def install_zoo_runtime(tools: Path, dry_run: bool) -> None:
+    package = tools / "node_modules" / "zod" / "package.json"
+    if package.is_file():
+        try:
+            if json.loads(package.read_text(encoding="utf-8")).get("version") == ZOO_ZOD_VERSION:
+                return
+        except (OSError, json.JSONDecodeError):
+            pass
+    npm = shutil.which("npm")
+    if not npm:
+        raise RuntimeError("Zoo 工具需要 npm 安装 zod，但当前环境找不到 npm。")
+    command = [npm, "install", "--no-save", "--no-package-lock", f"zod@{ZOO_ZOD_VERSION}"]
+    print(f"{'预览安装' if dry_run else '安装'} Zoo 工具运行时依赖：{' '.join(command)}")
+    if dry_run:
+        return
+    result = subprocess.run(command, cwd=tools, check=False)
+    if result.returncode or not package.is_file():
+        raise RuntimeError("Zoo 工具运行时依赖 zod 安装失败；请检查 npm 网络/镜像后重试安装脚本。")
+
+
 def install_zoo_tool(project: Path, target: Path, dry_run: bool) -> tuple[int, int]:
-    """安全部署 Zoo/Roo 索引工具，永不默认覆盖用户同名工具。"""
-    source = target / "tools" / "zoo" / "dependency-index.ts.template"
-    destination = project / ".roo" / "tools" / "pluginbase-dependency-index.ts"
+    """部署无 esbuild 裸包导入的 Zoo 索引工具，并自动准备本地 Zod 运行时。"""
+    source = target / "tools" / "zoo" / "dependency-index.js.template"
+    tools = project / ".roo" / "tools"
+    destination = tools / "pluginbase-dependency-index.js"
     if not source.is_file():
         raise RuntimeError(f"资料包缺少 Zoo 工具模板：{source}")
     if destination.exists():
         print(f"保留已有 Zoo 工具：{destination}")
+        install_zoo_runtime(tools, dry_run)
         return 0, 1
     action = "预览创建" if dry_run else "创建"
     print(f"{action} Zoo 工具：{destination}")
     if not dry_run:
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        tools.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
+    install_zoo_runtime(tools, dry_run)
     return 1, 0
 
 

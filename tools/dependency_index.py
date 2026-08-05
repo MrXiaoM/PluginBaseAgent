@@ -40,6 +40,7 @@ DEFAULT_LIMIT = 8
 MAX_LIMIT = 100
 CLASS_INSERT_BATCH_SIZE = 2_000
 API_INSERT_BATCH_SIZE = 2_000
+ZOO_ZOD_VERSION = "3.25.76"
 MARKER_START = "__PLUGIN_BASE_AGENT_DEPENDENCY_INDEX_START__"
 MARKER_END = "__PLUGIN_BASE_AGENT_DEPENDENCY_INDEX_END__"
 
@@ -1206,24 +1207,50 @@ def command_show(arguments: argparse.Namespace) -> int:
 
 
 def zoo_template() -> Path:
-    return SCRIPT_ROOT / "zoo" / "dependency-index.ts.template"
+    return SCRIPT_ROOT / "zoo" / "dependency-index.js.template"
+
+
+
+
+def install_zoo_runtime(tools: Path, dry_run: bool) -> None:
+    package = tools / "node_modules" / "zod" / "package.json"
+    if package.is_file():
+        try:
+            if json.loads(package.read_text(encoding="utf-8")).get("version") == ZOO_ZOD_VERSION:
+                return
+        except (OSError, json.JSONDecodeError):
+            pass
+    npm = shutil.which("npm")
+    if not npm:
+        raise IndexError("Zoo 工具需要 npm 安装 zod，但当前环境找不到 npm。")
+    command = [npm, "install", "--no-save", "--no-package-lock", f"zod@{ZOO_ZOD_VERSION}"]
+    print(f"{'预览安装' if dry_run else '安装'} Zoo 工具运行时依赖：{' '.join(command)}")
+    if dry_run:
+        return
+    result = subprocess.run(command, cwd=tools, check=False)
+    if result.returncode or not package.is_file():
+        raise IndexError("Zoo 工具运行时依赖 zod 安装失败；请检查 npm 网络/镜像后重试。")
+
 
 
 def command_install_zoo(arguments: argparse.Namespace) -> int:
     project = normalize_project(arguments.project)
     source = zoo_template()
-    destination = project / ".roo" / "tools" / "pluginbase-dependency-index.ts"
+    tools = project / ".roo" / "tools"
+    destination = tools / "pluginbase-dependency-index.js"
     if not source.is_file():
         raise IndexError(f"找不到 Zoo 工具模板：{source}")
     if destination.exists() and not arguments.force:
         print(f"保留已有 Zoo 工具：{destination}")
+        install_zoo_runtime(tools, arguments.dry_run)
         return 0
-    print(f"{'预览' if arguments.dry_run else ''}{'覆盖' if destination.exists() else '创建'} Zoo 工具：{destination}")
+    action = "覆盖" if destination.exists() else "创建"
+    print(f"{'预览' if arguments.dry_run else ''}{action} Zoo 工具：{destination}")
     if not arguments.dry_run:
-        destination.parent.mkdir(parents=True, exist_ok=True)
+        tools.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
+    install_zoo_runtime(tools, arguments.dry_run)
     return 0
-
 
 def main() -> int:
     arguments = parser().parse_args()

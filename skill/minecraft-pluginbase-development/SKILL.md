@@ -18,7 +18,7 @@ description: Guides development, maintenance, review, and version upgrades of Gr
 1. 在目标插件项目根目录检查 `agent-dev/README.md` 是否存在。
 2. 缺失时，执行本 Skill 的 `scripts/install_kit.py --project <目标插件项目根目录>`，一次完成 `assets/agent-dev-kit.zip` 释放、由目标项目 Gradle Wrapper 报告并写入 `agent-dev/state/environment.json`、以及首次依赖索引同步。
 3. 安装器优先保留既有 `gradleUserHomes`；首次配置从 Gradle 实际 `gradleUserHomeDir` 写入，而不是猜测默认 C 盘目录。只有 Wrapper 无法启动时才可用 `--gradle-user-home` 作为显式诊断覆盖。该文件是本地持久环境信息，必须保持忽略且不进入插件 JAR。
-4. 从 `.roo/skills/` 入口安装时，安装器还会自动创建 `.roo/tools/pluginbase-dependency-index.ts`；已有同名工具不覆盖。用户仅需在 Zoo Code Experimental 设置启用 Custom Tools。
+4. 从 `.roo/skills/` 入口安装时，安装器还会自动创建 `.roo/tools/pluginbase-dependency-index.js`，并在同目录安装所需 `zod@3.25.76`；已有同名 `.js` 工具不自动覆盖。用户仅需在 Zoo Code Experimental 设置启用 Custom Tools，并执行 Refresh Custom Tools。
 5. 每次任务开始、上下文压缩后恢复、重新连接或交接给新 Agent 时，先读取 `agent-dev/state/environment.json`；资料同步仅搜索其中配置的路径，不得自行改查默认 C 盘 Gradle 目录。只有文件不存在时才允许工具回退到环境变量或默认目录。
 6. 已存在时，不要覆盖；只有用户明确要求升级或重置时，执行 `scripts/install_kit.py --project <目标插件项目根目录> --force`。可先附加 `--dry-run` 预览；即使使用 `--force`，安装器仍保留已有 `environment.json` 和同名 Zoo 工具。
 7. 阅读项目内 `agent-dev/README.md`、`agent-dev/docs/01-agent-contract.md` 与任务对应的专题文档。不要在日常开发中修改此 Skill 目录；文档、工具、注册表和缓存均在项目内 `agent-dev/`。

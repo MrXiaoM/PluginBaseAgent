@@ -63,7 +63,7 @@ python agent-dev/tools/dependency_index.py show --project . --artifact <GAV或�
 
 ### Zoo Code 工具
 
-从项目 `.roo/skills/minecraft-pluginbase-development/` 运行初始化脚本时，安装器会自动创建 `./.roo/tools/pluginbase-dependency-index.ts`。同名已有工具始终保留，不会被自动覆盖。随后在 Zoo Code 的 Experimental 设置启用 Custom Tools，并按官方提示执行 `Refresh Custom Tools` 或重载窗口。
+从项目 `.roo/skills/minecraft-pluginbase-development/` 运行初始化脚本时，安装器会自动创建 `./.roo/tools/pluginbase-dependency-index.js`，并在该工具目录安装 `zod@3.25.76`。Zoo 对 `.js` 工具直接加载，避免项目目录缺少扩展内部 `@roo-code/types` 时的 esbuild 解析失败；参数仍使用真实 Zod schema。已有同名 `.js` 工具会保留，不自动覆盖。随后在 Zoo Code 的 Experimental 设置启用 Custom Tools，并按官方提示执行 `Refresh Custom Tools` 或重载窗口。
 
 Zoo Custom Tools 启用后会**自动批准**执行，因此只应启用已审查的项目工具。适配器只接受固定查询参数，以数组方式调用本 CLI，不提供任意 Shell 命令入口；它只返回紧凑字符串 JSON。`install-zoo` 子命令仅保留给非 `.roo/skills/` 安装路径的维护或修复场景。
 

@@ -1,13 +1,13 @@
-import { parametersSchema as z, defineCustomTool } from "@roo-code/types"
-import { execFile } from "child_process"
-import path from "path"
-import { promisify } from "util"
+const { execFile } = require("child_process")
+const path = require("path")
+const { promisify } = require("util")
+const { z } = require("zod/v4")
 
 const execFileAsync = promisify(execFile)
 const workspaceRoot = process.cwd()
 const cliPath = path.join(workspaceRoot, "agent-dev", "tools", "dependency_index.py")
 
-async function runCli(args: string[]): Promise<string> {
+async function runCli(args) {
   try {
     const { stdout, stderr } = await execFileAsync(
       "python",
@@ -20,13 +20,12 @@ async function runCli(args: string[]): Promise<string> {
       },
     )
     return stdout.trim() || stderr.trim() || "命令未返回结果。"
-  } catch (error: unknown) {
-    const detail = error as { stdout?: string; stderr?: string; message?: string }
-    return (detail.stdout || detail.stderr || detail.message || "依赖索引调用失败。").trim()
+  } catch (error) {
+    return (error.stdout || error.stderr || error.message || "依赖索引调用失败。").trim()
   }
 }
 
-export default defineCustomTool({
+module.exports = {
   name: "pluginbase_dependency_index",
   description: "查询当前项目 agent-dev 的本地 Gradle 依赖索引。先用 CLI sync 同步；结果仅用于定位，写入版本敏感 API 前仍须复核 sources/Javadoc。",
   parameters: z.object({
@@ -58,4 +57,4 @@ export default defineCustomTool({
     if (limit) args.push("--limit", String(limit))
     return runCli(args)
   },
-})
+}
