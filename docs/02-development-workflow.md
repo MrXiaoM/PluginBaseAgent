@@ -9,7 +9,9 @@
 - 需求目标、可观察行为与非目标；
 - Minecraft 目标版本和最低兼容版本；用户明确给出的版本号原样文本，以及必要时按 `server-api/minecraft-version-integrity.md` 进行的 Wiki 核验结果；
 - API 选择：默认 Spigot，或用户明确选择 Paper；
-- 是否涉及 NMS、可选依赖插件、数据库、文件迁移、网络/动态库、Folia 或箱子容器菜单；
+- 是否涉及 NMS、可选依赖插件、嵌入式外部依赖、数据库、文件迁移、网络/动态库、Folia 或箱子容器菜单；
+- 若涉及 `ItemPacketModifier`：项目锁定的 Maven Central GAV、`PacketEvents` 接入边界、包回调线程、客户端回传还原、重载/停用释放与真实物品数据边界；
+- 若涉及 `EvalEx-j8`：项目锁定的 Maven Central GAV、公式键契约、变量白名单、结果范围、精度/舍入、缓存替换与异步失效边界；
 - 若涉及箱子容器菜单：选择硬编码或配置驱动模式、所需 `gui`/`actions`/`l10n`/`paper` 模块、顶部 slot 与玩家背包交互策略、重载/关闭/异步回调边界；
 - 预计修改的项目文件和资源；
 - 可用于验证的构建任务、测试环境和服务器版本。
@@ -29,6 +31,8 @@
 涉及框架能力时，先确定需要哪个 `PluginBase` 模块。不要仅因类名“像是可用”就添加依赖或调用成员。
 
 涉及箱子容器菜单时，先从 `LibrariesResolver-Gradle` 的统一版本同步 `gui` 模块并查询计划调用的 `IGuiHolder`、`GuiManager`、`AbstractGuiModule`、`AbstractGuisModule` 或 `LoadedIcon`。配置点击动作或语言消息时，再按实际启用模块同步 `actions`、`l10n`。框架源码只确认能力边界；设计还必须读取目标项目已有的菜单类、YAML 和加载器，不能把模块源码误当完整菜单示例。
+
+涉及 `ItemPacketModifier` 或 `EvalEx-j8` 时，先阅读 `external-libraries/README.md` 与对应专题文档，再按项目锁定的 Maven Central 构件查询 POM、sources/Javadoc。前者只能用于客户端虚拟展示，必须设计发回物品还原与监听器释放；后者只能作为受约束的表达式求值器，必须先定义变量、结果、精度与业务校验，不能把公式文本当可信业务逻辑。
 
 ## 阶段 3：取得并记录证据
 
@@ -67,7 +71,7 @@
 
 实施时遵守以下顺序：
 
-1. 先更新构建依赖和 `PluginBase` 模块选择；
+1. 先更新构建依赖、嵌入式外部库的范围/重定位和 `PluginBase` 模块选择；
 2. 再更新 `plugin.yml`、配置默认资源和语言资源；
 3. 创建领域模型、适配层和模块；
 4. 最后在合适的框架生命周期中进行注册、加载和清理；
@@ -86,6 +90,8 @@
 - 所需 `PluginBase` 模块已加入，未引入无关模块；
 - `OptionsBuilder` 的选项与实际功能一致；
 - 自动注册、配置保存/重载和可选依赖失败路径完整；
+- `ItemPacketModifier` 的客户端展示与真实物品数据隔离、虚拟 Lore 幂等标记、客户端回传还原、包监听器停用释放和高频回调边界完整；
+- `EvalEx-j8` 的公式变量白名单、类型/范围/精度校验、解析失败回退、缓存/副本并发和业务副作用前校验完整；
 - 箱子容器菜单的顶部 Holder、玩家背包/拖拽取消策略、重复点击、关闭/退出、重载和异步回调边界完整；
 - `plugin.yml` 与主类、命令和依赖声明一致；
 - Shadow 规则覆盖 `PluginBase` 与会打进 JAR 的实现依赖。
@@ -99,7 +105,7 @@
 1. 是否产出目标插件 JAR；
 2. JAR 中是否包含重定位后的 `PluginBase`；
 3. JAR 中是否保留 `META-INF/PluginBaseHolders`；
-4. 是否误将服务器 API、开发资料或未重定位实现依赖打进 JAR；
+4. 是否误将服务器 API、开发资料或未重定位实现依赖打进 JAR；特别检查 `ItemPacketModifier`、`EvalEx-j8` 及其已确认需要嵌入的传递依赖；
 5. `plugin.yml` 是否位于 JAR 根目录且可被服务端读取；
 6. 有服务器环境时，是否在目标版本上启用、注册命令和执行关键路径。
 

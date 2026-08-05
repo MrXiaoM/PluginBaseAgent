@@ -39,6 +39,16 @@ PluginBase 资料默认从 Maven Central 的 `top.mrxiaom.pluginbase` 坐标下�
 
 若 Central 无法取得**完整的 sources 与 Javadoc 资料集**，工具才会整体回退到 JitPack。JitPack 对全部模块统一使用精确 group `top.mrxiaom.PluginBase`；其中 `PluginBase` 的大小写不可改变。
 
+## 通用外部依赖资料
+
+`api_evidence.py` 只接受 Spigot/Paper，`pluginbase_evidence.py` 只接受 PluginBase 模块；不要用它们同步 `ItemPacketModifier`、`EvalEx-j8` 或其它通用 Java 库。对于这些库：
+
+1. 从项目 `build.gradle.kts` 读取锁定的完整 GAV；
+2. 参照 `agent-dev/registry/artifacts.json` 从 Gradle 缓存或 Maven Central 取得同版本 POM、`sources.jar`、`javadoc.jar`；
+3. 按 `agent-dev/docs/evidence/query-playbook.md` 的人工查询流程检查精确类、成员、线程和传递依赖；
+4. 将来源、哈希、命中路径与适用边界写入证据记录；
+5. 阅读 `agent-dev/docs/external-libraries/item-packet-modifier.md` 或 `agent-dev/docs/external-libraries/evalex-j8.md`，完成相应生命周期、输入与 JAR 验证。
+
 ## `verify_plugin_project.py`
 
 用于静态检查一个目标插件项目：

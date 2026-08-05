@@ -2,14 +2,14 @@
 
 项目内 `agent-dev/registry/` 保存 Spigot、Paper、PluginBase 与必要配套构件的资料获取策略。注册表让工具按项目声明的版本可复现地定位 sources/Javadoc，而不是依赖 Agent 记忆、开发机目录或网页搜索结果。
 
-当前实现使用 `artifacts.json` 管理 Spigot/Paper API，使用 `pluginbase.json` 管理 PluginBase 模块、Maven Central 优先与 JitPack 回退；工具命令见 `../../tools/README.md`。
+当前实现使用 `artifacts.json` 管理 Spigot/Paper API 与已登记的通用外部依赖，使用 `pluginbase.json` 管理 PluginBase 模块、Maven Central 优先与 JitPack 回退；工具命令见 `../../tools/README.md`。
 
 ## 注册表位置
 
 ```text
 agent-dev/
   registry/
-    artifacts.json      # 服务端 API 与通用构件策略
+    artifacts.json      # 服务端 API 与通用外部构件策略
     pluginbase.json     # PluginBase 模块、版本与资料策略
 ```
 
@@ -69,6 +69,12 @@ PluginBase 注册表除了 Maven 坐标，还应维护：
 - LibrariesResolver 相关构件与 PluginBase 版本关系。
 
 工具不能因为项目在 `pluginBaseModules` 中有一个模块，就假定其它模块的 class 也随之存在。
+
+## 通用外部依赖规则
+
+`artifacts.json` 中的 `item-packet-modifier`、`evalex-j8` 等 `external-library` 条目可提供 Maven Central、sources/Javadoc 与默认版本元数据，但现有 `api_evidence.py` 只接受 `spigot`、`paper`，不得假定它能自动同步通用库。查询通用库时，按 `../evidence/query-playbook.md` 的人工流程从项目锁定坐标、Gradle 缓存或 Maven Central 取得证据。
+
+通用库条目应明确其运行期风险与专题文档；它们不是 PluginBase 模块，不能依据 `LibrariesResolver-Gradle` 的统一版本锚点推导版本。
 
 ## 注册表变更审查
 

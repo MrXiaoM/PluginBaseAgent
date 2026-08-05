@@ -8,6 +8,7 @@
 - [ ] Spigot/Paper API 使用 `compileOnly`。
 - [ ] PluginBase 所需模块使用 `implementation` 并加入模块列表。
 - [ ] 外部插件 API 使用正确范围，并与 `depend`/`softdepend` 一致。
+- [ ] `ItemPacketModifier`、`EvalEx-j8` 等嵌入式外部库使用项目锁定的 Maven Central GAV；已核对 POM、传递依赖、许可证、实际包前缀与版本资料。
 - [ ] Java 构建环境与目标字节码配置已确认。
 - [ ] 仓库、Gradle Wrapper 和插件版本没有被无意改动。
 - [ ] `shadowGroup` 为当前插件独有的私有包。
@@ -35,6 +36,7 @@
 - [ ] `META-INF/PluginBaseHolders` 存在且非空或符合项目无 Holder 的明确情况。
 - [ ] 没有打包 `org/bukkit/`、`io/papermc/paper/`、外部插件 API 或开发资料。
 - [ ] 需打包的实现依赖存在，且包名、服务文件、反射路径和资源路径经过审查。
+- [ ] `ItemPacketModifier`、`EvalEx-j8` 等嵌入式外部库位于预期重定位后的私有包路径；没有以原始包名残留、重复版本或遗漏必要传递依赖。
 - [ ] 没有打包源代码归档、Javadoc、`agent-dev/`、Gradle 缓存或测试数据。
 
 ## 运行验证
@@ -44,6 +46,8 @@
 - [ ] 自动注册模块没有构造器、类加载、优先级或依赖警告。
 - [ ] `paper` 模块在 Spigot 环境回退到 Bukkit 工厂，在 Paper 环境按预期使用 Paper 工厂。
 - [ ] 命令、监听器、配置重载、数据库、动态库和核心业务路径至少执行一次。
+- [ ] `ItemPacketModifier` 的虚拟 Lore 已在实际物品发送和客户端回传路径测试，重载/停用后无遗留监听器或重复展示。
+- [ ] `EvalEx-j8` 的公式已覆盖有效输入、语法错误、缺失变量、边界/舍入与业务副作用回退。
 - [ ] Folia 支持声明已在 Folia 环境验证；未验证则不宣称通过。
 
 ## 不能完成时

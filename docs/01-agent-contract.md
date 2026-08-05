@@ -11,7 +11,8 @@
 3. 是否允许 NMS、CraftBukkit 或版本包代码；未明确允许时，按不允许处理。
 4. `build.gradle.kts` 中现有的 API 坐标、`top.mrxiaom:LibrariesResolver-Gradle` 精确版本、`PluginBase` 模块、可选依赖、Java 目标版本和 Shadow 配置。
 5. `LibrariesResolver-Gradle` 的精确版本是全部 PluginBase 模块的统一版本锚点；只从 `pluginBaseModules` 识别实际启用模块，并以该统一版本同步其资料，不得为未启用模块逐个猜测或探测版本。
-6. 功能是否需要配置、数据库、GUI、Action、命令、富文本、调度、BungeeCord、动态库或外部插件兼容。
+6. 功能是否需要配置、数据库、GUI、Action、命令、富文本、调度、BungeeCord、动态库、外部插件兼容或嵌入式外部依赖。
+7. 若使用 `ItemPacketModifier` 或 `EvalEx-j8`，从项目锁定的 Maven Central GAV 取得 POM、sources/Javadoc，核对实际包名、公开签名、传递依赖、许可证、重定位与运行期线程边界；不得用本资料包示例版本替代项目版本。
 
 若这些事实影响实现而无法从用户需求和当前项目中确定，先提出最少必要的问题；不得擅自选用 Paper 或 NMS。对陌生或前沿的用户版本号，可按 `server-api/minecraft-version-integrity.md` 使用 Wiki 原样 URL 核验，但不得改写该输入。
 
@@ -34,8 +35,10 @@
 - Paper 专用 API；
 - NMS、CraftBukkit 或反射目标；
 - `PluginBase` 的模块、Options、生命周期、自动注册、调度器、配置、物品栏和物品编辑行为；
-- 外部插件 API 和可选依赖的类名；
-- 依赖坐标、传递依赖、重定位包名和产物资源路径。
+- 外部插件 API、可选依赖和嵌入式外部库的类名；
+- 依赖坐标、传递依赖、重定位包名和产物资源路径；
+- `ItemPacketModifier` 的包回调线程、客户端回传还原与监听器释放；
+- `EvalEx-j8` 的表达式 API、可变实例/副本并发语义及数值精度策略。
 
 证据必须能说明**精确版本**、**来源类型**、**文件或锚点**与**实际签名/描述**。查询工具完成前，至少应保留这些信息到开发记录、改动说明或提交说明中。格式见 `evidence/evidence-record-format.md`。
 
