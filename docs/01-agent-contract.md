@@ -6,13 +6,14 @@
 
 在改动代码、构建脚本或资源前，确认并记录：
 
-1. 目标 Minecraft 版本及最低兼容版本；用户明确给出的版本号必须逐字保留，不得因知识库、旧版命名模式或资料查询失败而擅自改写。
-2. 服务器 API 选择：未特别指定时为 **Spigot**；Paper 必须由用户明确选择，或由已验证的需求证明不可替代。
-3. 是否允许 NMS、CraftBukkit 或版本包代码；未明确允许时，按不允许处理。
-4. `build.gradle.kts` 中现有的 API 坐标、`top.mrxiaom:LibrariesResolver-Gradle` 精确版本、`PluginBase` 模块、可选依赖、Java 目标版本和 Shadow 配置。
-5. `LibrariesResolver-Gradle` 的精确版本是全部 PluginBase 模块的统一版本锚点；只从 `pluginBaseModules` 识别实际启用模块，并以该统一版本同步其资料，不得为未启用模块逐个猜测或探测版本。
-6. 功能是否需要配置、数据库、GUI、Action、命令、富文本、调度、BungeeCord、动态库、外部插件兼容或嵌入式外部依赖。
-7. 若使用 `ItemPacketModifier` 或 `EvalEx-j8`，从项目锁定的 Maven Central GAV 取得 POM、sources/Javadoc，核对实际包名、公开签名、传递依赖、许可证、重定位与运行期线程边界；不得用本资料包示例版本替代项目版本。
+1. `agent-dev/state/environment.json` 中的持久本地环境信息，特别是 `gradleUserHomes`。上下文压缩后恢复、重新连接或交接任务时也必须重新读取；该文件存在时不得扫描默认 C 盘 Gradle 目录。
+2. 目标 Minecraft 版本及最低兼容版本；用户明确给出的版本号必须逐字保留，不得因知识库、旧版命名模式或资料查询失败而擅自改写。
+3. 服务器 API 选择：未特别指定时为 **Spigot**；Paper 必须由用户明确选择，或由已验证的需求证明不可替代。
+4. 是否允许 NMS、CraftBukkit 或版本包代码；未明确允许时，按不允许处理。
+5. `build.gradle.kts` 中现有的 API 坐标、`top.mrxiaom:LibrariesResolver-Gradle` 精确版本、`PluginBase` 模块、可选依赖、Java 目标版本和 Shadow 配置。
+6. `LibrariesResolver-Gradle` 的精确版本是全部 PluginBase 模块的统一版本锚点；只从 `pluginBaseModules` 识别实际启用模块，并以该统一版本同步其资料，不得为未启用模块逐个猜测或探测版本。
+7. 功能是否需要配置、数据库、GUI、Action、命令、富文本、调度、BungeeCord、动态库、外部插件兼容或嵌入式外部依赖。
+8. 若使用 `ItemPacketModifier` 或 `EvalEx-j8`，从项目锁定的 Maven Central GAV 取得 POM、sources/Javadoc，核对实际包名、公开签名、传递依赖、许可证、重定位与运行期线程边界；不得用本资料包示例版本替代项目版本。
 
 若这些事实影响实现而无法从用户需求和当前项目中确定，先提出最少必要的问题；不得擅自选用 Paper 或 NMS。对陌生或前沿的用户版本号，可按 `server-api/minecraft-version-integrity.md` 使用 Wiki 原样 URL 核验，但不得改写该输入。
 

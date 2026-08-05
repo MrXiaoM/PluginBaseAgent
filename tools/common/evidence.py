@@ -64,14 +64,40 @@ def normalize_maven_path(group: str, artifact: str, version: str) -> str:
     return "/".join([group.replace(".", "/"), artifact, version])
 
 
-def default_gradle_homes(explicit: str | None) -> list[Path]:
+def configured_gradle_homes(state_root: Path) -> list[Path] | None:
+    """读取项目持久环境配置；文件存在时不允许隐式回退到默认 Gradle 目录。"""
+    path = state_root / "environment.json"
+    if not path.is_file():
+        return None
+    environment = load_json(path)
+    homes = environment.get("gradleUserHomes")
+    if not isinstance(homes, list) or not all(isinstance(value, str) and value.strip() for value in homes):
+        raise EvidenceError(
+            f"环境配置 `{path}` 的 gradleUserHomes 必须是非空路径字符串数组；"
+            "为避免误查默认 Gradle 目录，工具已停止。"
+        )
+    if not homes:
+        raise EvidenceError(
+            f"环境配置 `{path}` 尚未填写 gradleUserHomes；"
+            "请填入实际 Gradle 缓存目录，或为本次命令显式传入 --gradle-user-home。"
+        )
+    return [Path(value).expanduser() for value in homes]
+
+
+def default_gradle_homes(explicit: str | None, state_root: Path) -> list[Path]:
+    """按显式参数、项目环境文件、环境变量、默认目录的顺序取得 Gradle 缓存。"""
     candidates: list[Path] = []
     if explicit:
         candidates.append(Path(explicit).expanduser())
-    environment = os.environ.get("GRADLE_USER_HOME")
-    if environment:
-        candidates.append(Path(environment).expanduser())
-    candidates.append(Path.home() / ".gradle")
+    else:
+        configured = configured_gradle_homes(state_root)
+        if configured is not None:
+            candidates.extend(configured)
+        else:
+            environment = os.environ.get("GRADLE_USER_HOME")
+            if environment:
+                candidates.append(Path(environment).expanduser())
+            candidates.append(Path.home() / ".gradle")
     unique: list[Path] = []
     for candidate in candidates:
         resolved = candidate.resolve() if candidate.exists() else candidate
@@ -208,7 +234,7 @@ def sync(
 ) -> dict[str, Any]:
     root = artifact_root(state_root, ecosystem, version)
     downloads = state_root / "downloads" / ecosystem / version
-    homes = default_gradle_homes(gradle_user_home)
+    homes = default_gradle_homes(gradle_user_home, state_root)
     artifact_entries: list[dict[str, Any]] = []
     for classifier in classifiers:
         archive = downloads / f"{artifact}-{version}-{classifier}.jar"

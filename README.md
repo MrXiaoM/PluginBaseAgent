@@ -24,7 +24,7 @@
 
 `agent-dev/` 是插件项目的一部分，不依赖开发者本机的其它目录。Agent 应优先读取项目内 `agent-dev/` 的内容；不得假设存在本仓库调研时使用的本机 `PluginBase`、模板站点、示例插件或 Gradle 缓存路径。
 
-配套工具位于 `agent-dev/tools/`，本地下载的归档、解包资料、索引和查询记录位于 `agent-dev/state/`。`state/` 是运行期缓存，不应提交到插件的版本控制仓库；文档、注册表和工具应随项目提交，以固定该项目使用的开发规范版本。
+配套工具位于 `agent-dev/tools/`，本地下载的归档、解包资料、索引和查询记录位于 `agent-dev/state/`。`state/environment.json` 专门保存本项目机器的持久环境信息，例如实际 Gradle 缓存目录；它使 Agent 在上下文压缩、重新连接或交接后无需猜测或扫描默认 C 盘路径。`state/` 不应提交到插件的版本控制仓库；文档、注册表和工具应随项目提交，以固定该项目使用的开发规范版本。
 
 ## 目录导航
 
@@ -47,11 +47,12 @@
 ## 推荐阅读顺序
 
 1. 新建项目或首次接入时，先阅读工作区根 `QUICKSTART.md`，完成模板项目、Skill 与 `agent-dev/` 的安装。
-2. 阅读 `docs/00-layout-and-usage.md`，确认当前项目中资料包的位置和可写目录。
-3. 阅读 `docs/01-agent-contract.md`，确认目标 Minecraft 版本、服务器 API 与兼容边界。
-4. 根据任务读取 `docs/02-development-workflow.md` 和对应专题文档。
-5. 使用 `tools/api_evidence.py` 或 `tools/pluginbase_evidence.py` 同步并查询目标版本资料，再实现版本敏感代码。
-6. 修改完成后按 `docs/quality/build-and-artifact-checklist.md` 执行构建与产物检查。
+2. 填写并在每次任务恢复后阅读 `state/environment.json`，确认本机 `gradleUserHomes`；该文件存在时不得自行扫描默认 C 盘 Gradle 目录。
+3. 阅读 `docs/00-layout-and-usage.md`，确认当前项目中资料包的位置和可写目录。
+4. 阅读 `docs/01-agent-contract.md`，确认目标 Minecraft 版本、服务器 API 与兼容边界。
+5. 根据任务读取 `docs/02-development-workflow.md` 和对应专题文档。
+6. 使用 `tools/api_evidence.py` 或 `tools/pluginbase_evidence.py` 同步并查询目标版本资料，再实现版本敏感代码。
+7. 修改完成后按 `docs/quality/build-and-artifact-checklist.md` 执行构建与产物检查。
 
 ## 适用范围
 

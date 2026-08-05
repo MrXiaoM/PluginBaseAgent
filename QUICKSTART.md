@@ -53,16 +53,29 @@ python .agents/skills/minecraft-pluginbase-development/scripts/install_kit.py --
 python .opencode/skills/minecraft-pluginbase-development/scripts/install_kit.py --project .
 ```
 
-它会生成项目内 `agent-dev/`，其中包含 Agent 规范、资料查询工具、构件注册表和本地缓存目录。
+它会生成项目内 `agent-dev/`，其中包含 Agent 规范、资料查询工具、构件注册表和本地缓存目录，同时创建不会被后续安装覆盖的 `agent-dev/state/environment.json` 模板。
 
-## 5. 开始开发
+## 5. 配置本机 Gradle 缓存
 
-将 `agent-dev/state/` 加入项目根 `.gitignore`；它保存本地下载和解包缓存，不能提交或打进插件 JAR。
+将 `agent-dev/state/` 加入项目根 `.gitignore`；它保存本地环境、本地下载和解包缓存，不能提交或打进插件 JAR。然后填写 `agent-dev/state/environment.json`：
+
+```json
+{
+  "schemaVersion": 1,
+  "gradleUserHomes": [
+    "I:/gradle-cache"
+  ]
+}
+```
+
+将示例路径替换为本机实际 Gradle 用户目录。资料工具在这个文件存在时只搜索 `gradleUserHomes`，不会自行扫描默认 C 盘目录；以后即使 AI 上下文恢复或换 Agent，也先读取该文件。需要单次临时覆盖时，命令可附加 `--gradle-user-home <目录>`。
+
+## 6. 开始开发
 
 然后向已安装的 AI 工具发送一次以下提示词，完成项目资料环境初始化：
 
 ```text
-请读取本项目的 agent-dev/README.md 和 agent-dev/docs/01-agent-contract.md，检查 build.gradle.kts、plugin.yml 与当前 PluginBase 配置；将 build.gradle.kts 中 top.mrxiaom:LibrariesResolver-Gradle 的精确版本作为所有 PluginBase 模块的统一版本锚点，从 pluginBaseModules 收集实际启用的模块，仅同步这些模块的资料，不要逐个猜测或获取其它模块版本。以项目中声明的 Minecraft 版本原样同步所需的 Spigot 或 Paper API 资料。不要修改项目代码或构建配置；完成后报告 API 与 PluginBase 的精确构件版本、已同步模块、同步来源、缓存位置和未能取得的资料。
+请先读取本项目的 agent-dev/state/environment.json、agent-dev/README.md 和 agent-dev/docs/01-agent-contract.md；严格使用 environment.json 的 gradleUserHomes，不要扫描默认 C 盘 Gradle 目录。检查 build.gradle.kts、plugin.yml 与当前 PluginBase 配置；将 build.gradle.kts 中 top.mrxiaom:LibrariesResolver-Gradle 的精确版本作为所有 PluginBase 模块的统一版本锚点，从 pluginBaseModules 收集实际启用的模块，仅同步这些模块的资料，不要逐个猜测或获取其它模块版本。以项目中声明的 Minecraft 版本原样同步所需的 Spigot 或 Paper API 资料。不要修改项目代码或构建配置；完成后报告 API 与 PluginBase 的精确构件版本、已同步模块、同步来源、缓存位置和未能取得的资料。
 ```
 
 发送前，请先在项目配置或提示词中明确目标 Minecraft 版本；用户指定的版本必须原样保留，不能自行改写。首次涉及版本敏感 API 或 PluginBase 符号时，AI 仍会先用 `agent-dev/tools/` 查询已同步资料。

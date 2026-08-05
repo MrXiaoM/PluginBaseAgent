@@ -10,6 +10,7 @@
 agent-dev/
   registry/                         # 坐标、仓库与回退策略
   state/
+    environment.json                # 本机 Gradle 缓存等持久环境信息；忽略
     downloads/                      # 原始归档；忽略
     evidence/
       spigot/<版本>/
@@ -24,13 +25,14 @@ agent-dev/
 ## 查询前准备
 
 1. 从项目 `build.gradle.kts` 读取实际 API 坐标、PluginBase 版本和模块；
-2. 确认需求对应的 Minecraft 版本、最低版本与 Spigot/Paper 选择；
-3. 从 `agent-dev/state/` 查找是否已有相同构件、相同哈希的资料；
-4. 缓存不存在或版本/哈希不同，则优先从配置的 Gradle 用户目录复用；
-5. 仍不存在时，再从官方/配置的 Maven 仓库获取 sources 和 Javadoc；
-6. 将归档、来源 URL、获取时间、哈希和解包路径写入清单。
+2. 先读取 `agent-dev/state/environment.json`；上下文恢复、重新连接或新 Agent 接手时也必须先做此步，确认 `gradleUserHomes` 的实际非 C 盘缓存目录；
+3. 确认需求对应的 Minecraft 版本、最低版本与 Spigot/Paper 选择；
+4. 从 `agent-dev/state/` 查找是否已有相同构件、相同哈希的资料；
+5. 缓存不存在或版本/哈希不同，则优先从 `environment.json` 配置的 Gradle 用户目录复用；
+6. 仍不存在时，再从官方/配置的 Maven 仓库获取 sources 和 Javadoc；
+7. 将归档、来源 URL、获取时间、哈希和解包路径写入清单。
 
-Gradle 缓存的位置不能硬编码。现有工具接受显式 `--gradle-user-home`，其次读取 `GRADLE_USER_HOME`，最后使用运行环境默认值。
+Gradle 缓存的位置不能硬编码。`state/environment.json` 存在时，工具只读取其 `gradleUserHomes`，不会扫描 `GRADLE_USER_HOME` 或默认 C 盘用户目录；空值或无效配置会停止。显式 `--gradle-user-home` 可单次覆盖该配置，未配置环境文件时才依次读取 `GRADLE_USER_HOME` 与运行环境默认目录。
 
 ## 人工查询方式
 

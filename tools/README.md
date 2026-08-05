@@ -6,7 +6,7 @@
 python agent-dev/tools/<脚本>.py ...
 ```
 
-所有下载归档、解包资料、清单和查询结果写入 `agent-dev/state/`；不要把它们打进插件 JAR 或提交到版本控制。
+所有下载归档、解包资料、清单和查询结果写入 `agent-dev/state/`；不要把它们打进插件 JAR 或提交到版本控制。首次使用前填写 `agent-dev/state/environment.json` 的 `gradleUserHomes`，记录本机实际 Gradle 缓存目录；每次恢复任务先读取该文件。
 
 ## `api_evidence.py`
 
@@ -22,7 +22,7 @@ python agent-dev/tools/api_evidence.py status
 
 `--minecraft` 是用户提供的 Minecraft 版本原样文本。工具不会将 `1.21.11` 改为 `1.21.1`，也不会将 `26.2` 补成其它旧式格式。若精确 Maven 构件版本与默认 `<minecraft>-R0.1-SNAPSHOT` 不同，显式传入 `--artifact-version`；映射依据必须写入证据记录。
 
-同步顺序是：项目 `state/` 已有资料、显式 `--gradle-user-home`、`GRADLE_USER_HOME`、默认 Gradle 用户目录、注册表 Maven 仓库。每个归档都会记录来源、`SHA-256` 与解包文件数。
+同步顺序是：项目 `state/` 已有资料、显式 `--gradle-user-home`、`state/environment.json` 的 `gradleUserHomes`、注册表 Maven 仓库。只有不存在 `environment.json` 时，才回退到 `GRADLE_USER_HOME` 与默认 Gradle 用户目录；配置文件存在但路径为空/无效时会停止，绝不隐式搜索默认 C 盘目录。每个归档都会记录来源、`SHA-256` 与解包文件数。
 
 ## `pluginbase_evidence.py`
 

@@ -12,6 +12,12 @@ from pathlib import Path, PurePosixPath
 
 SCRIPT_ROOT = Path(__file__).resolve().parent
 KIT_ARCHIVE = SCRIPT_ROOT.parent / "assets" / "agent-dev-kit.zip"
+ENVIRONMENT_PATH = Path("state/environment.json")
+ENVIRONMENT_TEMPLATE = """{
+  "schemaVersion": 1,
+  "gradleUserHomes": []
+}
+"""
 
 
 def parser() -> argparse.ArgumentParser:
@@ -32,6 +38,18 @@ def safe_destination(root: Path, member_name: str) -> Path:
     if resolved_root != resolved_destination and resolved_root not in resolved_destination.parents:
         raise RuntimeError(f"资源包路径逃逸：{member_name}")
     return destination
+
+
+def install_environment(target: Path, dry_run: bool) -> tuple[int, int]:
+    destination = safe_destination(target, ENVIRONMENT_PATH.as_posix())
+    if destination.exists():
+        print(f"保留已有本地环境配置：{destination}")
+        return 0, 1
+    print(f"创建本地环境配置模板：{destination}")
+    if not dry_run:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_text(ENVIRONMENT_TEMPLATE, encoding="utf-8", newline="\n")
+    return 1, 0
 
 
 def install(project: Path, force: bool, dry_run: bool) -> tuple[int, int]:
@@ -59,7 +77,8 @@ def install(project: Path, force: bool, dry_run: bool) -> tuple[int, int]:
                 installed += 1
     except zipfile.BadZipFile as error:
         raise RuntimeError(f"Skill 资源不是有效 ZIP：{KIT_ARCHIVE}") from error
-    return installed, skipped
+    environment_installed, environment_skipped = install_environment(target, dry_run)
+    return installed + environment_installed, skipped + environment_skipped
 
 
 def main() -> int:
@@ -77,7 +96,7 @@ def main() -> int:
     print(f"{result}：处理 {installed} 个文件，跳过 {skipped} 个已有文件。")
     if not arguments.dry_run:
         print(f"项目内开发包：{project / 'agent-dev'}")
-        print("提示：agent-dev/state/ 是本地缓存，不应提交版本控制或打进插件 JAR。")
+        print("提示：填写 agent-dev/state/environment.json 的 gradleUserHomes；它是本地配置，不应提交版本控制或打进插件 JAR。")
     return 0
 
 
