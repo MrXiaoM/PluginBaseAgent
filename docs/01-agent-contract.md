@@ -14,7 +14,7 @@
 6. `LibrariesResolver-Gradle` 的精确版本是全部 PluginBase 模块的统一版本锚点；只从 `pluginBaseModules` 识别实际启用模块，并以该统一版本同步其资料，不得为未启用模块逐个猜测或探测版本。
 7. 功能是否需要配置、数据库、GUI、Action、命令、富文本、调度、BungeeCord、动态库、外部插件兼容或嵌入式外部依赖。
 8. 若使用 `ItemPacketModifier` 或 `EvalEx-j8`，从项目锁定的 Maven Central GAV 取得 POM、sources/Javadoc，核对实际包名、公开签名、传递依赖、许可证、重定位与运行期线程边界；不得用本资料包示例版本替代项目版本。
-9. 遇到陌生 Gradle 依赖时，先检查 `agent-dev/state/indexes/dependency-index.json` 的新鲜状态；需要时用 `dependency_index.py sync` 取得真实解析依赖。已知接收者类型时，用类型限定成员搜索沿 `extends`/`implements` 链定位实际声明，不能因实现类型本身未声明成员就误判 API 不存在。
+9. 遇到陌生 Gradle 依赖时，先检查 `agent-dev/state/indexes/dependency-index.sqlite3` 的新鲜状态；需要时用 `dependency_index.py sync` 取得真实解析依赖。该索引用 SQLite/FTS 按需查询，不复制或解包完整 sources/Javadoc；已知接收者类型时，用类型限定成员搜索沿 `extends`/`implements` 链定位实际声明，不能因实现类型本身未声明成员就误判 API 不存在。
 
 若这些事实影响实现而无法从用户需求和当前项目中确定，先提出最少必要的问题；不得擅自选用 Paper 或 NMS。对陌生或前沿的用户版本号，可按 `server-api/minecraft-version-integrity.md` 使用 Wiki 原样 URL 核验，但不得改写该输入。
 

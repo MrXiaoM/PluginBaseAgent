@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""按 Gradle 模块建立本地依赖、类与公开 Java API 索引。"""
+"""按 Gradle 模块建立 SQLite 依赖、类与公开 Java API 索引。"""
 
 from __future__ import annotations
 
@@ -9,30 +9,31 @@ import json
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tempfile
 import time
 import zipfile
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any, Iterable, Iterator
 
 SCRIPT_ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(SCRIPT_ROOT))
 
 from common.evidence import (  # noqa: E402
     EvidenceError,
-    copy_or_download,
     default_gradle_homes,
+    download_artifact,
+    find_cached_artifacts,
     print_error,
     sha256,
-    write_json,
 )
 
 PROJECT_ROOT = SCRIPT_ROOT.parent
 STATE_ROOT = PROJECT_ROOT / "state"
-INDEX_SCHEMA_VERSION = 1
-TOOL_VERSION = "1"
+INDEX_SCHEMA_VERSION = 3
+TOOL_VERSION = "3"
 DEFAULT_REPOSITORIES = ("https://repo.maven.apache.org/maven2/",)
 DEFAULT_LIMIT = 8
 MAX_LIMIT = 100
@@ -50,32 +51,25 @@ allprojects { project ->
             if (project != root) return
             def output = [schemaVersion: 1, gradleVersion: gradle.gradleVersion, projects: []]
             root.allprojects.sort { it.path }.each { current ->
-                def repositories = current.repositories.findAll { repository ->
-                    repository.hasProperty("url")
-                }.collect { repository -> repository.url.toString() }.unique()
+                def repositories = current.repositories.findAll { repository -> repository.hasProperty("url") }
+                    .collect { repository -> repository.url.toString() }.unique()
                 def projectData = [path: current.path, name: current.name, repositories: repositories, configurations: []]
                 current.configurations.findAll { configuration -> configuration.canBeResolved }.sort { it.name }.each { configuration ->
                     def configData = [name: configuration.name, status: "ok", artifacts: [], dependencies: [], failures: []]
                     try {
-                        def artifacts = configuration.resolvedConfiguration.resolvedArtifacts.toList().sort { it.file.absolutePath }
-                        artifacts.each { artifact ->
+                        configuration.resolvedConfiguration.resolvedArtifacts.toList().sort { it.file.absolutePath }.each { artifact ->
                             def id = artifact.moduleVersion.id
                             configData.artifacts << [
-                                group: id.group ?: "",
-                                artifact: id.name ?: "",
-                                version: id.version ?: "",
-                                classifier: artifact.classifier ?: "",
-                                extension: artifact.extension ?: "",
-                                file: artifact.file.absolutePath,
-                                type: artifact.type ?: ""
+                                group: id.group ?: "", artifact: id.name ?: "", version: id.version ?: "",
+                                classifier: artifact.classifier ?: "", extension: artifact.extension ?: "",
+                                file: artifact.file.absolutePath, type: artifact.type ?: ""
                             ]
                         }
                         configuration.incoming.resolutionResult.allDependencies.each { dependency ->
                             def requested = dependency.requested?.displayName ?: ""
                             def from = dependency.from?.id?.displayName ?: ""
                             if (dependency instanceof org.gradle.api.artifacts.result.ResolvedDependencyResult) {
-                                def selected = dependency.selected?.id?.displayName ?: ""
-                                configData.dependencies << [kind: "resolved", from: from, requested: requested, selected: selected]
+                                configData.dependencies << [kind: "resolved", from: from, requested: requested, selected: dependency.selected?.id?.displayName ?: ""]
                             } else if (dependency instanceof org.gradle.api.artifacts.result.UnresolvedDependencyResult) {
                                 configData.dependencies << [kind: "unresolved", from: from, requested: requested, selected: ""]
                                 configData.failures << (dependency.failure?.message ?: requested)
@@ -98,9 +92,7 @@ allprojects { project ->
     }
 }
 gradle.rootProject { root ->
-    root.tasks.matching { it.name == "pluginBaseAgentDependencyIndex" }.configureEach { task ->
-        task.outputs.upToDateWhen { false }
-    }
+    root.tasks.matching { it.name == "pluginBaseAgentDependencyIndex" }.configureEach { task -> task.outputs.upToDateWhen { false } }
 }
 '''
 
@@ -110,17 +102,17 @@ class IndexError(EvidenceError):
 
 
 def parser() -> argparse.ArgumentParser:
-    root = argparse.ArgumentParser(description="按 Gradle 模块查询本地依赖、类和公开 Java API 索引。")
+    root = argparse.ArgumentParser(description="按 Gradle 模块查询 SQLite 依赖、类和公开 Java API 索引。")
     root.add_argument("--state", type=Path, default=STATE_ROOT, help="agent-dev 本地状态目录")
     subcommands = root.add_subparsers(dest="command", required=True)
 
-    sync_parser = subcommands.add_parser("sync", help="同步 Gradle 模块、依赖、类与公开 API 索引")
+    sync_parser = subcommands.add_parser("sync", help="同步 Gradle 模块、依赖、类与公开 API 到 SQLite")
     add_project_argument(sync_parser)
     sync_parser.add_argument("--gradle-user-home", help="单次 Gradle/资料缓存目录覆盖")
     sync_parser.add_argument("--configuration", action="append", default=[], help="只同步名称匹配的可解析配置，可重复")
-    sync_parser.add_argument("--no-api", action="store_true", help="只索引依赖与类名，不下载 sources/Javadoc")
+    sync_parser.add_argument("--no-api", action="store_true", help="只索引依赖与类名，不读取 sources/Javadoc")
 
-    status_parser = subcommands.add_parser("status", help="显示索引摘要与是否过期")
+    status_parser = subcommands.add_parser("status", help="显示 SQLite 索引摘要与是否过期")
     add_project_argument(status_parser)
     status_parser.add_argument("--json", action="store_true", help="输出紧凑 JSON")
 
@@ -135,7 +127,7 @@ def parser() -> argparse.ArgumentParser:
     dependencies_parser.add_argument("--transitive", action="store_true", help="同时显示传递依赖边")
     add_output_arguments(dependencies_parser)
 
-    classes_parser = subcommands.add_parser("classes", help="按类名、简单名或包前缀查找类")
+    classes_parser = subcommands.add_parser("classes", help="按类名、简单名或包前缀搜索类")
     add_project_argument(classes_parser)
     classes_parser.add_argument("query", help="类名关键词")
     add_output_arguments(classes_parser)
@@ -151,7 +143,7 @@ def parser() -> argparse.ArgumentParser:
     show_parser.add_argument("--artifact", required=True, help="GAV、文件名或构件哈希前缀")
     add_output_arguments(show_parser)
 
-    zoo_parser = subcommands.add_parser("install-zoo", help="显式安装可选 Zoo Code 查询工具")
+    zoo_parser = subcommands.add_parser("install-zoo", help="显式安装 Zoo Code 查询工具（维护/修复用途）")
     add_project_argument(zoo_parser)
     zoo_parser.add_argument("--force", action="store_true", help="覆盖同名 Zoo 工具")
     zoo_parser.add_argument("--dry-run", action="store_true", help="只显示将创建或跳过的文件")
@@ -170,7 +162,7 @@ def add_output_arguments(command: argparse.ArgumentParser) -> None:
 
 
 def index_path(state_root: Path) -> Path:
-    return state_root / "indexes" / "dependency-index.json"
+    return state_root / "indexes" / "dependency-index.sqlite3"
 
 
 def normalize_project(project: Path) -> Path:
@@ -183,17 +175,12 @@ def normalize_project(project: Path) -> Path:
 def project_files(project: Path) -> list[Path]:
     names = ("settings.gradle", "settings.gradle.kts", "build.gradle", "build.gradle.kts", "gradle.properties", "gradle.lockfile")
     files = [project / name for name in names if (project / name).is_file()]
-    files.extend(sorted(path for path in project.rglob("*.versions.toml") if ".gradle" in path.parts))
-    for lockfile in project.rglob("*.lockfile"):
-        if ".gradle" in lockfile.parts:
-            files.append(lockfile)
+    files.extend(path for path in project.rglob("*.versions.toml") if ".gradle" in path.parts)
+    files.extend(path for path in project.rglob("*.lockfile") if ".gradle" in path.parts)
     wrapper = project / "gradle" / "wrapper"
     if wrapper.is_dir():
-        files.extend(sorted(path for path in wrapper.iterdir() if path.is_file()))
-    for name in ("gradlew", "gradlew.bat"):
-        candidate = project / name
-        if candidate.is_file():
-            files.append(candidate)
+        files.extend(path for path in wrapper.iterdir() if path.is_file())
+    files.extend(project / name for name in ("gradlew", "gradlew.bat") if (project / name).is_file())
     return sorted(set(files))
 
 
@@ -210,7 +197,6 @@ def fingerprint(project: Path) -> dict[str, Any]:
 
 
 def gradle_command(project: Path, arguments: list[str]) -> list[str]:
-    """跨平台启动项目 Wrapper；Windows 优先 gradlew.bat，再回退 Git Bash。"""
     batch = project / "gradlew.bat"
     shell = project / "gradlew"
     if sys.platform == "win32" and batch.is_file():
@@ -227,6 +213,11 @@ def gradle_command(project: Path, arguments: list[str]) -> list[str]:
     raise IndexError(f"找不到 Gradle Wrapper：{shell} 或 {batch}")
 
 
+def compact_text(value: str, limit: int) -> str:
+    normalized = " ".join(value.split())
+    return normalized[:limit] + ("…" if len(normalized) > limit else "")
+
+
 def run_gradle(project: Path, state_root: Path, explicit_home: str | None) -> dict[str, Any]:
     homes = default_gradle_homes(explicit_home, state_root)
     environment = os.environ.copy()
@@ -235,14 +226,9 @@ def run_gradle(project: Path, state_root: Path, explicit_home: str | None) -> di
     with tempfile.TemporaryDirectory(prefix="pluginbase-agent-index-") as temporary:
         init_file = Path(temporary) / "dependency-index.init.gradle"
         init_file.write_text(INIT_SCRIPT, encoding="utf-8", newline="\n")
-        arguments = gradle_command(
-            project, ["--no-daemon", "--console=plain", "--init-script", str(init_file), "pluginBaseAgentDependencyIndex"]
-        )
+        command = gradle_command(project, ["--no-daemon", "--console=plain", "--init-script", str(init_file), "pluginBaseAgentDependencyIndex"])
         try:
-            result = subprocess.run(
-                arguments, cwd=project, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-                encoding="utf-8", errors="replace", timeout=300, check=False,
-            )
+            result = subprocess.run(command, cwd=project, env=environment, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, encoding="utf-8", errors="replace", timeout=300, check=False)
         except OSError as error:
             raise IndexError(f"无法启动 Gradle Wrapper：{error}") from error
         except subprocess.TimeoutExpired as error:
@@ -251,11 +237,9 @@ def run_gradle(project: Path, state_root: Path, explicit_home: str | None) -> di
     start = output.find(MARKER_START)
     end = output.find(MARKER_END, start + len(MARKER_START))
     if start < 0 or end < 0:
-        tail = compact_text(output, 800)
-        raise IndexError(f"Gradle 未输出索引 JSON（退出码 {result.returncode}）：{tail}")
-    payload = output[start + len(MARKER_START):end].strip()
+        raise IndexError(f"Gradle 未输出索引 JSON（退出码 {result.returncode}）：{compact_text(output, 800)}")
     try:
-        parsed = json.loads(payload)
+        parsed = json.loads(output[start + len(MARKER_START):end].strip())
     except json.JSONDecodeError as error:
         raise IndexError(f"Gradle 输出的索引 JSON 无效：{error}") from error
     if not isinstance(parsed, dict) or not isinstance(parsed.get("projects"), list):
@@ -263,36 +247,63 @@ def run_gradle(project: Path, state_root: Path, explicit_home: str | None) -> di
     return parsed
 
 
-def compact_text(value: str, limit: int) -> str:
-    normalized = " ".join(value.split())
-    return normalized[:limit] + ("…" if len(normalized) > limit else "")
-
-
 def selected_configurations(raw: dict[str, Any], names: list[str]) -> dict[str, Any]:
     if not names:
         return raw
     wanted = set(names)
-    copy = dict(raw)
-    projects = []
-    for project in raw.get("projects", []):
-        current = dict(project)
-        current["configurations"] = [item for item in project.get("configurations", []) if item.get("name") in wanted]
-        projects.append(current)
-    copy["projects"] = projects
-    return copy
+    result = dict(raw)
+    result["projects"] = [
+        {**project, "configurations": [item for item in project.get("configurations", []) if item.get("name") in wanted]}
+        for project in raw.get("projects", [])
+    ]
+    return result
+
+
+def native_path(value: str) -> Path:
+    """将 Git Bash/MSYS 的 /c/... Gradle 路径转换为原生 Windows 可访问路径。"""
+    if os.name == "nt":
+        match = re.match(r"^/([A-Za-z])/(.*)$", value)
+        if match:
+            return Path(f"{match.group(1)}:/{match.group(2)}")
+    return Path(value)
 
 
 def valid_coordinate(artifact: dict[str, Any]) -> tuple[str, str, str] | None:
-    group = str(artifact.get("group", "")).strip()
-    name = str(artifact.get("artifact", "")).strip()
-    version = str(artifact.get("version", "")).strip()
+    group, name, version = (str(artifact.get(key, "")).strip() for key in ("group", "artifact", "version"))
     if not group or not name or not version or group == "unspecified" or version == "unspecified":
         return None
     return group, name, version
 
 
-def class_names(archive: Path) -> list[dict[str, str]]:
-    result: list[dict[str, str]] = []
+def coordinate_text(row: sqlite3.Row) -> str:
+    if row["group_name"] and row["artifact_name"] and row["version"]:
+        return f"{row['group_name']}:{row['artifact_name']}:{row['version']}"
+    return row["file_name"] or "未知文件"
+
+
+def repositories_for(project_data: dict[str, Any]) -> list[str]:
+    values = [str(value).rstrip("/") + "/" for value in project_data.get("repositories", []) if str(value).startswith(("http://", "https://"))]
+    return list(dict.fromkeys([*values, *DEFAULT_REPOSITORIES]))
+
+
+def reference_archive(classifier: str, coordinate: tuple[str, str, str], repositories: Iterable[str], homes: Iterable[Path]) -> tuple[Path, dict[str, str], Path | None] | None:
+    """优先原地读取 Gradle 缓存；远程构件仅使用临时文件。"""
+    group, artifact, version = coordinate
+    cached = find_cached_artifacts(homes, group, artifact, version, classifier)
+    if cached:
+        archive = cached[0]
+        return archive, {"sha256": sha256(archive), "origin": "gradle-cache", "source": str(archive), "resolvedVersion": version}, None
+    with tempfile.NamedTemporaryFile(prefix=f"pluginbase-agent-{classifier}-", suffix=".jar", delete=False) as temporary:
+        destination = Path(temporary.name)
+    try:
+        url, resolved_version = download_artifact(repositories, group, artifact, version, classifier, destination)
+        return destination, {"sha256": sha256(destination), "origin": "maven", "source": url, "resolvedVersion": resolved_version}, destination
+    except EvidenceError:
+        destination.unlink(missing_ok=True)
+        return None
+
+
+def iter_class_names(archive: Path) -> Iterator[tuple[str, str]]:
     try:
         with zipfile.ZipFile(archive) as source:
             for entry in source.namelist():
@@ -301,145 +312,9 @@ def class_names(archive: Path) -> list[dict[str, str]]:
                 binary = entry[:-6].replace("/", ".")
                 if binary.rsplit(".", 1)[-1].isdigit():
                     continue
-                result.append({"binaryName": binary, "name": binary.replace("$", ".")})
+                yield binary.replace("$", "."), binary
     except zipfile.BadZipFile:
-        return []
-    return sorted(result, key=lambda item: item["name"])
-
-
-def clean_segment(value: str) -> str:
-    return re.sub(r"[^A-Za-z0-9_.-]+", "_", value)
-
-
-def artifact_cache_root(state_root: Path, artifact_hash: str) -> Path:
-    return state_root / "indexes" / "artifacts" / artifact_hash
-
-
-def repositories_for(project_data: dict[str, Any]) -> list[str]:
-    values = [str(value).rstrip("/") + "/" for value in project_data.get("repositories", []) if str(value).startswith(("http://", "https://"))]
-    return list(dict.fromkeys([*values, *DEFAULT_REPOSITORIES]))
-
-
-def copy_reference_archive(
-    *, state_root: Path, artifact_hash: str, classifier: str, coordinate: tuple[str, str, str], repositories: Iterable[str], homes: Iterable[Path]
-) -> dict[str, Any] | None:
-    group, artifact, version = coordinate
-    root = artifact_cache_root(state_root, artifact_hash)
-    destination = root / f"{classifier}.jar"
-    extracted = root / classifier
-    try:
-        copied = copy_or_download(
-            gradle_homes=homes, group=group, artifact=artifact, version=version, classifier=classifier,
-            repositories=repositories, destination=destination,
-        )
-    except EvidenceError:
-        return None
-    current_hash = sha256(destination)
-    if not extracted.is_dir() or not (root / f"{classifier}.sha256").is_file() or (root / f"{classifier}.sha256").read_text(encoding="utf-8").strip() != current_hash:
-        if extracted.exists():
-            shutil.rmtree(extracted)
-        safe_extract_archive(destination, extracted)
-        (root / f"{classifier}.sha256").write_text(current_hash + "\n", encoding="utf-8", newline="\n")
-    return {
-        "archive": str(destination.relative_to(state_root)).replace("\\", "/"),
-        "sha256": current_hash,
-        "origin": copied["origin"],
-        "source": copied["source"],
-        "extracted": str(extracted.relative_to(state_root)).replace("\\", "/"),
-    }
-
-
-def safe_extract_archive(archive: Path, destination: Path) -> None:
-    destination.mkdir(parents=True, exist_ok=True)
-    with zipfile.ZipFile(archive) as source:
-        for member in source.infolist():
-            target = destination / member.filename
-            resolved_root = destination.resolve()
-            resolved_target = target.resolve()
-            if member.filename.startswith(("/", "\\")) or ".." in Path(member.filename).parts or (resolved_root != resolved_target and resolved_root not in resolved_target.parents):
-                raise IndexError(f"归档包含不安全路径：{member.filename}")
-            if member.is_dir():
-                target.mkdir(parents=True, exist_ok=True)
-                continue
-            target.parent.mkdir(parents=True, exist_ok=True)
-            with source.open(member) as input_stream, target.open("wb") as output_stream:
-                shutil.copyfileobj(input_stream, output_stream)
-
-
-def public_api(source_root: Path, javadoc_root: Path | None) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    if not source_root.is_dir():
-        return records
-    for source in sorted(source_root.rglob("*.java")):
-        try:
-            lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
-        except OSError:
-            continue
-        package = ""
-        imports: dict[str, str] = {}
-        for line in lines[:200]:
-            found = re.match(r"\s*package\s+([\w.]+)\s*;", line)
-            if found:
-                package = found.group(1)
-            imported = re.match(r"\s*import\s+(?:static\s+)?([\w.]+)\s*;", line)
-            if imported and not imported.group(1).endswith(".*"):
-                qualified_import = imported.group(1)
-                imports[qualified_import.rsplit(".", 1)[-1]] = qualified_import
-        records.extend(java_public_declarations(lines, package, imports, source.relative_to(source_root).as_posix(), javadoc_root))
-    return records
-
-
-def java_public_declarations(
-    lines: list[str], package: str, imports: dict[str, str], source_path: str, javadoc_root: Path | None
-) -> list[dict[str, Any]]:
-    records: list[dict[str, Any]] = []
-    types: list[tuple[str, int, bool]] = []
-    depth = 0
-    in_block_comment = False
-    pending = ""
-    type_pattern = re.compile(r"\bpublic\s+(?:abstract\s+|final\s+|static\s+)*(class|interface|enum|record|@interface)\s+(\w+)")
-    for line_number, raw in enumerate(lines, start=1):
-        line, in_block_comment = strip_java_comments(raw, in_block_comment)
-        if not line.strip():
-            continue
-        opened = line.count("{")
-        closed = line.count("}")
-        found_type = type_pattern.search(line)
-        if found_type:
-            kind = found_type.group(1)
-            name = found_type.group(2)
-            qualified = f"{package}.{name}" if package else name
-            types.append((name, depth + opened - closed, kind in {"interface", "@interface"}))
-            record = api_record("type", qualified, name, line.strip(), source_path, line_number, javadoc_root, None)
-            record["supertypes"] = declared_supertypes(line, package, imports)
-            records.append(record)
-        if types:
-            pending = (pending + " " + line.strip()).strip()
-            if len(pending) > 1000:
-                pending = ""
-            if (";" in line or "{" in line) and ("public" in pending or types[-1][2]):
-                declaration = re.sub(r"\s+", " ", pending).strip()
-                owner = types[-1][0]
-                qualified_owner = f"{package}.{owner}" if package else owner
-                implicitly_public = types[-1][2]
-                method = re.search(r"\b(?:public\s+)?(?:static\s+|final\s+|abstract\s+|synchronized\s+|default\s+|native\s+|strictfp\s+|<[^>]+>\s+)*[\w.$<>?, \[\]]+\s+(\w+)\s*\(([^)]*)\)", declaration)
-                constructor = re.search(rf"\bpublic\s+{re.escape(owner)}\s*\(([^)]*)\)", declaration)
-                field = re.search(r"\b(?:public\s+)?(?:static\s+|final\s+|volatile\s+|transient\s+)*[\w.$<>?, \[\]]+\s+(\w+)\s*(?:=|;|,)", declaration)
-                if method:
-                    member = method.group(1)
-                    records.append(api_record("method", qualified_owner, member, declaration, source_path, line_number, javadoc_root, member))
-                elif constructor:
-                    records.append(api_record("constructor", qualified_owner, owner, declaration, source_path, line_number, javadoc_root, owner))
-                elif field:
-                    member = field.group(1)
-                    records.append(api_record("field", qualified_owner, member, declaration, source_path, line_number, javadoc_root, member))
-                pending = ""
-            elif not line.rstrip().endswith((",", "throws")):
-                pending = ""
-        depth += opened - closed
-        while types and depth < types[-1][1]:
-            types.pop()
-    return records
+        return
 
 
 def strip_java_comments(line: str, in_block: bool) -> tuple[str, bool]:
@@ -452,300 +327,419 @@ def strip_java_comments(line: str, in_block: bool) -> tuple[str, bool]:
                 return result, True
             index = close + 2
             in_block = False
-            continue
-        if line.startswith("/*", index):
+        elif line.startswith("/*", index):
             in_block = True
             index += 2
-            continue
-        if line.startswith("//", index):
+        elif line.startswith("//", index):
             break
-        result += line[index]
-        index += 1
+        else:
+            result += line[index]
+            index += 1
     return result, in_block
 
 
-def api_record(kind: str, owner: str, name: str, declaration: str, source: str, line: int, javadoc_root: Path | None, member: str | None) -> dict[str, Any]:
-    type_path = owner.replace(".", "/") + ".html"
-    javadoc: dict[str, str] | None = None
-    if javadoc_root is not None and (javadoc_root / type_path).is_file():
-        javadoc = {"path": type_path}
-        if member:
-            javadoc["anchorHint"] = member
-    return {"kind": kind, "owner": owner, "name": name, "declaration": declaration, "source": source, "line": line, "javadoc": javadoc}
-
-
 def declared_supertypes(declaration: str, package: str, imports: dict[str, str]) -> list[str]:
-    """从 Java 类型声明提取 extends/implements；仅保存可追溯的声明关系。"""
     clauses = re.search(r"\b(?:extends|implements)\b\s+(.+?)(?:\{|$)", declaration)
     if not clauses:
         return []
-    names = re.split(r"\s*,\s*|\bimplements\b", clauses.group(1))
-    result: list[str] = []
-    for raw in names:
-        cleaned = re.sub(r"<.*?>", "", raw).strip().split()[0] if raw.strip() else ""
-        if not cleaned:
+    result = []
+    for raw in re.split(r"\s*,\s*|\bimplements\b", clauses.group(1)):
+        value = re.sub(r"<.*?>", "", raw).strip().split()[0] if raw.strip() else ""
+        if not value:
             continue
-        if "." in cleaned:
-            result.append(cleaned)
-        elif cleaned in imports:
-            result.append(imports[cleaned])
-        elif package:
-            result.append(f"{package}.{cleaned}")
-        else:
-            result.append(cleaned)
+        result.append(value if "." in value else imports.get(value, f"{package}.{value}" if package else value))
     return result
 
 
-def artifact_entry(
-    *, artifact: dict[str, Any], state_root: Path, homes: list[Path], repositories: list[str], include_api: bool
-) -> dict[str, Any]:
-    source_file = Path(str(artifact.get("file", "")))
-    if not source_file.is_file():
-        return {"id": "missing:" + clean_segment(str(artifact.get("file", ""))), "status": "missing", "file": str(source_file)}
-    file_hash = sha256(source_file)
-    coordinate = valid_coordinate(artifact)
-    entry: dict[str, Any] = {
-        "id": file_hash,
-        "status": "ok",
-        "coordinate": {"group": coordinate[0], "artifact": coordinate[1], "version": coordinate[2]} if coordinate else None,
-        "classifier": str(artifact.get("classifier", "")),
-        "extension": str(artifact.get("extension", "")),
-        "fileName": source_file.name,
-        "file": str(source_file),
-        "sha256": file_hash,
-        "classes": class_names(source_file),
-        "sources": None,
-        "javadoc": None,
-        "api": [],
-        "apiStatus": "not-requested" if not include_api else "unavailable",
-    }
-    if not coordinate or not include_api:
-        return entry
-    sources = copy_reference_archive(
-        state_root=state_root, artifact_hash=file_hash, classifier="sources", coordinate=coordinate,
-        repositories=repositories, homes=homes,
-    )
-    javadoc = copy_reference_archive(
-        state_root=state_root, artifact_hash=file_hash, classifier="javadoc", coordinate=coordinate,
-        repositories=repositories, homes=homes,
-    )
-    entry["sources"] = sources
-    entry["javadoc"] = javadoc
-    if sources:
-        source_root = state_root / str(sources["extracted"])
-        javadoc_root = state_root / str(javadoc["extracted"]) if javadoc else None
-        entry["api"] = public_api(source_root, javadoc_root)
-        entry["apiStatus"] = "sources" if javadoc else "sources-only"
-    elif javadoc:
-        entry["apiStatus"] = "javadoc-only"
-    return entry
+def java_public_declarations(lines: list[str], package: str, imports: dict[str, str], source_path: str) -> list[dict[str, Any]]:
+    records: list[dict[str, Any]] = []
+    types: list[tuple[str, int, bool]] = []
+    depth = 0
+    in_block_comment = False
+    pending = ""
+    type_pattern = re.compile(r"\bpublic\s+(?:abstract\s+|final\s+|static\s+)*(class|interface|enum|record|@interface)\s+(\w+)")
+    for line_number, raw in enumerate(lines, start=1):
+        line, in_block_comment = strip_java_comments(raw, in_block_comment)
+        if not line.strip():
+            continue
+        opened, closed = line.count("{"), line.count("}")
+        found_type = type_pattern.search(line)
+        if found_type:
+            kind, name = found_type.groups()
+            owner = f"{package}.{name}" if package else name
+            types.append((name, depth + opened - closed, kind in {"interface", "@interface"}))
+            records.append({"kind": "type", "owner": owner, "name": name, "declaration": line.strip(), "source": source_path, "line": line_number, "supertypes": declared_supertypes(line, package, imports), "javadoc": None, "documentation": None})
+        if types:
+            pending = (pending + " " + line.strip()).strip()
+            if len(pending) > 1000:
+                pending = ""
+            if (";" in line or "{" in line) and ("public" in pending or types[-1][2]):
+                declaration = re.sub(r"\s+", " ", pending).strip()
+                owner_name, interface = types[-1][0], types[-1][2]
+                owner = f"{package}.{owner_name}" if package else owner_name
+                method = re.search(r"\b(?:public\s+)?(?:static\s+|final\s+|abstract\s+|synchronized\s+|default\s+|native\s+|strictfp\s+|<[^>]+>\s+)*[\w.$<>?, \[\]]+\s+(\w+)\s*\(([^)]*)\)", declaration)
+                constructor = re.search(rf"\bpublic\s+{re.escape(owner_name)}\s*\(([^)]*)\)", declaration)
+                field = re.search(r"\b(?:public\s+)?(?:static\s+|final\s+|volatile\s+|transient\s+)*[\w.$<>?, \[\]]+\s+(\w+)\s*(?:=|;|,)", declaration)
+                if method:
+                    member = method.group(1)
+                    records.append({"kind": "method", "owner": owner, "name": member, "declaration": declaration, "source": source_path, "line": line_number, "supertypes": [], "javadoc": None, "documentation": None})
+                elif constructor:
+                    records.append({"kind": "constructor", "owner": owner, "name": owner_name, "declaration": declaration, "source": source_path, "line": line_number, "supertypes": [], "javadoc": None, "documentation": None})
+                elif field:
+                    member = field.group(1)
+                    records.append({"kind": "field", "owner": owner, "name": member, "declaration": declaration, "source": source_path, "line": line_number, "supertypes": [], "javadoc": None, "documentation": None})
+                pending = ""
+            elif not line.rstrip().endswith((",", "throws")):
+                pending = ""
+        depth += opened - closed
+        while types and depth < types[-1][1]:
+            types.pop()
+    return records
 
 
-def build_index(arguments: argparse.Namespace) -> dict[str, Any]:
+def html_text(value: str) -> str:
+    value = re.sub(r"<script\b[^>]*>.*?</script>|<style\b[^>]*>.*?</style>", "", value, flags=re.IGNORECASE | re.DOTALL)
+    return compact_text(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", value)).strip(), 420)
+
+
+def add_javadoc_summaries(records: list[dict[str, Any]], source: zipfile.ZipFile) -> None:
+    by_owner: dict[str, list[dict[str, Any]]] = {}
+    for record in records:
+        by_owner.setdefault(str(record["owner"]), []).append(record)
+    for owner, owner_records in by_owner.items():
+        path = owner.replace(".", "/") + ".html"
+        try:
+            document = source.read(path).decode("utf-8", errors="replace")
+        except KeyError:
+            continue
+        blocks = re.findall(r'<div class="block">(.*?)</div>', document, flags=re.IGNORECASE | re.DOTALL)
+        summary = html_text(blocks[0]) if blocks else ""
+        for record in owner_records:
+            record["javadoc"] = path
+            if record["kind"] == "type":
+                record["documentation"] = summary or None
+                continue
+            name = re.escape(str(record["name"]))
+            found = re.search(rf'id="[^"]*{name}[^"]*".*?<div class="block">(.*?)</div>', document, flags=re.IGNORECASE | re.DOTALL)
+            if found:
+                record["documentation"] = html_text(found.group(1)) or None
+
+
+def iter_public_api(source_archive: Path, javadoc_archive: Path | None, progress_prefix: str) -> Iterator[dict[str, Any]]:
+    """顺序读取归档；每次只保留一个 Java 文件及其对应类型页面。"""
+    try:
+        with zipfile.ZipFile(source_archive) as sources:
+            java_count = sum(1 for info in sources.infolist() if not info.is_dir() and info.filename.endswith(".java"))
+            javadocs = zipfile.ZipFile(javadoc_archive) if javadoc_archive else None
+            processed = 0
+            try:
+                for info in sources.infolist():
+                    if info.is_dir() or not info.filename.endswith(".java"):
+                        continue
+                    processed += 1
+                    if processed == 1 or processed % 200 == 0 or processed == java_count:
+                        print(f"{progress_prefix}公开 API 文件 {processed}/{java_count}", flush=True)
+                    lines = sources.read(info).decode("utf-8", errors="replace").splitlines()
+                    package = ""
+                    imports: dict[str, str] = {}
+                    for line in lines[:200]:
+                        found = re.match(r"\s*package\s+([\w.]+)\s*;", line)
+                        if found:
+                            package = found.group(1)
+                        imported = re.match(r"\s*import\s+(?:static\s+)?([\w.]+)\s*;", line)
+                        if imported and not imported.group(1).endswith(".*"):
+                            qualified = imported.group(1)
+                            imports[qualified.rsplit(".", 1)[-1]] = qualified
+                    records = java_public_declarations(lines, package, imports, info.filename)
+                    if javadocs and records:
+                        add_javadoc_summaries(records, javadocs)
+                    yield from records
+            finally:
+                if javadocs:
+                    javadocs.close()
+    except zipfile.BadZipFile:
+        return
+
+
+def open_database(path: Path, writable: bool = False) -> sqlite3.Connection:
+    if not writable and not path.is_file():
+        raise IndexError(f"尚无 SQLite 依赖索引；先运行 `dependency_index.py sync --project .`。")
+    if writable:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path)
+    connection.row_factory = sqlite3.Row
+    return connection
+
+
+def create_schema(connection: sqlite3.Connection) -> None:
+    connection.executescript("""
+        PRAGMA journal_mode=DELETE;
+        PRAGMA synchronous=NORMAL;
+        PRAGMA temp_store=MEMORY;
+        CREATE TABLE metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+        CREATE TABLE modules (path TEXT PRIMARY KEY, name TEXT NOT NULL);
+        CREATE TABLE configurations (id INTEGER PRIMARY KEY, module_path TEXT NOT NULL, name TEXT NOT NULL, status TEXT NOT NULL, UNIQUE(module_path, name));
+        CREATE TABLE artifacts (id TEXT PRIMARY KEY, group_name TEXT, artifact_name TEXT, version TEXT, classifier TEXT, extension TEXT, file_name TEXT, file_path TEXT, sha256 TEXT, sources_sha256 TEXT, sources_origin TEXT, sources_source TEXT, javadoc_sha256 TEXT, javadoc_origin TEXT, javadoc_source TEXT, api_status TEXT NOT NULL);
+        CREATE TABLE configuration_artifacts (configuration_id INTEGER NOT NULL, artifact_id TEXT NOT NULL, PRIMARY KEY(configuration_id, artifact_id));
+        CREATE TABLE dependencies (configuration_id INTEGER NOT NULL, kind TEXT NOT NULL, requested TEXT, selected TEXT, failure TEXT);
+        CREATE TABLE classes (id INTEGER PRIMARY KEY, artifact_id TEXT NOT NULL, name TEXT NOT NULL, binary_name TEXT NOT NULL);
+        CREATE TABLE api (id INTEGER PRIMARY KEY, artifact_id TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, name TEXT NOT NULL, declaration TEXT NOT NULL, source_path TEXT NOT NULL, source_line INTEGER NOT NULL, javadoc_path TEXT, documentation TEXT);
+        CREATE TABLE type_edges (child_owner TEXT NOT NULL, parent_owner TEXT NOT NULL, PRIMARY KEY(child_owner, parent_owner));
+        CREATE INDEX classes_artifact_idx ON classes(artifact_id);
+        CREATE INDEX api_owner_idx ON api(owner);
+        CREATE INDEX api_artifact_idx ON api(artifact_id);
+        CREATE INDEX edges_parent_idx ON type_edges(parent_owner);
+        CREATE INDEX configurations_module_idx ON configurations(module_path);
+        CREATE VIRTUAL TABLE class_search USING fts5(name, binary_name, artifact_id UNINDEXED, class_id UNINDEXED, tokenize='unicode61', prefix='2 3 4');
+        CREATE VIRTUAL TABLE api_search USING fts5(owner, name, declaration, documentation, api_id UNINDEXED, tokenize='unicode61', prefix='2 3 4');
+    """)
+
+
+def metadata(connection: sqlite3.Connection) -> dict[str, str]:
+    return {row["key"]: row["value"] for row in connection.execute("SELECT key, value FROM metadata")}
+
+
+def fts_query(query: str) -> str:
+    terms = re.findall(r"[\w.$]+", query, flags=re.UNICODE)
+    if not terms:
+        raise IndexError("查询文本不包含可搜索字符。")
+    return " AND ".join(f'"{term.replace("\"", "")}"*' for term in terms)
+
+
+def artifact_id(raw: dict[str, Any]) -> str:
+    path = native_path(str(raw.get("file", "")))
+    return sha256(path) if path.is_file() else "missing:" + re.sub(r"[^A-Za-z0-9_.-]+", "_", str(path))
+
+
+def insert_artifact(connection: sqlite3.Connection, raw: dict[str, Any], homes: list[Path], repositories: list[str], include_api: bool, position: int, total: int) -> None:
+    path = native_path(str(raw.get("file", "")))
+    identifier = artifact_id(raw)
+    if not path.is_file():
+        connection.execute("INSERT INTO artifacts(id, file_name, file_path, api_status) VALUES (?, ?, ?, ?)", (identifier, path.name, str(path), "missing"))
+        return
+    coordinate = valid_coordinate(raw)
+    label = ":".join(coordinate) if coordinate else path.name
+    prefix = f"[3/4] 构件 {position}/{total} {label}："
+    print(prefix + "扫描类名", flush=True)
+    source_reference = reference_archive("sources", coordinate, repositories, homes) if coordinate and include_api else None
+    javadoc_reference = reference_archive("javadoc", coordinate, repositories, homes) if coordinate and include_api else None
+    sources_info = source_reference[1] if source_reference else None
+    javadoc_info = javadoc_reference[1] if javadoc_reference else None
+    api_status = "not-requested" if not include_api else ("sources" if source_reference and javadoc_reference else "sources-only" if source_reference else "javadoc-only" if javadoc_reference else "unavailable")
+    connection.execute("""
+        INSERT INTO artifacts(id, group_name, artifact_name, version, classifier, extension, file_name, file_path, sha256, sources_sha256, sources_origin, sources_source, javadoc_sha256, javadoc_origin, javadoc_source, api_status)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    """, (identifier, *(coordinate or (None, None, None)), str(raw.get("classifier", "")), str(raw.get("extension", "")), path.name, str(path), sha256(path), *(sources_info[key] if sources_info else None for key in ("sha256", "origin", "source")), *(javadoc_info[key] if javadoc_info else None for key in ("sha256", "origin", "source")), api_status))
+    for name, binary in iter_class_names(path):
+        cursor = connection.execute("INSERT INTO classes(artifact_id, name, binary_name) VALUES (?, ?, ?)", (identifier, name, binary))
+        connection.execute("INSERT INTO class_search(name, binary_name, artifact_id, class_id) VALUES (?, ?, ?, ?)", (name, binary, identifier, cursor.lastrowid))
+    if source_reference:
+        source_archive, _, source_temporary = source_reference
+        javadoc_archive = javadoc_reference[0] if javadoc_reference else None
+        print(prefix + ("读取 sources 与 Javadoc 摘要" if javadoc_archive else "读取 sources"), flush=True)
+        try:
+            for record in iter_public_api(source_archive, javadoc_archive, prefix):
+                cursor = connection.execute("INSERT INTO api(artifact_id, kind, owner, name, declaration, source_path, source_line, javadoc_path, documentation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)", (identifier, record["kind"], record["owner"], record["name"], record["declaration"], record["source"], record["line"], record["javadoc"], record["documentation"]))
+                connection.execute("INSERT INTO api_search(owner, name, declaration, documentation, api_id) VALUES (?, ?, ?, ?, ?)", (record["owner"], record["name"], record["declaration"], record["documentation"] or "", cursor.lastrowid))
+                if record["kind"] == "type":
+                    connection.executemany("INSERT OR IGNORE INTO type_edges(child_owner, parent_owner) VALUES (?, ?)", ((record["owner"], parent) for parent in record["supertypes"]))
+        finally:
+            if source_temporary:
+                source_temporary.unlink(missing_ok=True)
+    if javadoc_reference and javadoc_reference[2]:
+        javadoc_reference[2].unlink(missing_ok=True)
+
+
+def remove_legacy_index_state(state_root: Path) -> None:
+    """仅清理由本工具旧版写入的 JSON、归档副本和解包目录。"""
+    legacy_json = state_root / "indexes" / "dependency-index.json"
+    legacy_artifacts = state_root / "indexes" / "artifacts"
+    if legacy_json.is_file():
+        print(f"清理旧 JSON 索引：{legacy_json}", flush=True)
+        legacy_json.unlink()
+    if legacy_artifacts.is_dir():
+        print(f"清理旧索引归档与解包目录：{legacy_artifacts}", flush=True)
+        shutil.rmtree(legacy_artifacts)
+
+
+def build_database(arguments: argparse.Namespace, database: Path) -> None:
     project = normalize_project(arguments.project)
     state_root = arguments.state.resolve()
+    print("[1/4] 正在由项目 Gradle Wrapper 解析模块和依赖…", flush=True)
     raw = selected_configurations(run_gradle(project, state_root, arguments.gradle_user_home), arguments.configuration)
     homes = default_gradle_homes(arguments.gradle_user_home, state_root)
-    artifact_cache: dict[str, dict[str, Any]] = {}
-    modules: list[dict[str, Any]] = []
+    unique: dict[str, tuple[dict[str, Any], list[str]]] = {}
     for project_data in raw["projects"]:
         repositories = repositories_for(project_data)
-        configurations: list[dict[str, Any]] = []
-        for configuration in project_data.get("configurations", []):
-            artifact_ids: list[str] = []
-            for raw_artifact in configuration.get("artifacts", []):
-                path = Path(str(raw_artifact.get("file", "")))
-                artifact_id = sha256(path) if path.is_file() else "missing:" + clean_segment(str(path))
-                if artifact_id not in artifact_cache:
-                    artifact_cache[artifact_id] = artifact_entry(
-                        artifact=raw_artifact, state_root=state_root, homes=homes, repositories=repositories,
-                        include_api=not arguments.no_api,
-                    )
-                artifact_ids.append(artifact_id)
-            configurations.append({
-                "name": str(configuration.get("name", "")), "status": str(configuration.get("status", "unknown")),
-                "artifacts": sorted(set(artifact_ids)), "dependencies": configuration.get("dependencies", []),
-                "failures": configuration.get("failures", []),
-            })
-        modules.append({"path": str(project_data.get("path", "")), "name": str(project_data.get("name", "")), "configurations": configurations})
-    return {
-        "schemaVersion": INDEX_SCHEMA_VERSION,
-        "toolVersion": TOOL_VERSION,
-        "createdAtEpoch": int(time.time()),
-        "project": {"path": str(project), "fingerprint": fingerprint(project)},
-        "gradleVersion": raw.get("gradleVersion"),
-        "modules": modules,
-        "artifacts": artifact_cache,
-    }
-
-
-def load_index(arguments: argparse.Namespace) -> dict[str, Any]:
-    path = index_path(arguments.state)
+        for config in project_data.get("configurations", []):
+            for artifact in config.get("artifacts", []):
+                unique.setdefault(artifact_id(artifact), (artifact, repositories))
+    print(f"[2/4] 已发现 {len(raw['projects'])} 个模块、{len(unique)} 个唯一构件；开始流式建立 SQLite 索引…", flush=True)
+    remove_legacy_index_state(state_root)
+    temporary = database.with_suffix(database.suffix + ".tmp")
+    temporary.unlink(missing_ok=True)
+    connection = open_database(temporary, writable=True)
     try:
-        with path.open("r", encoding="utf-8") as stream:
-            value = json.load(stream)
-    except FileNotFoundError as error:
-        raise IndexError(f"尚无依赖索引；先运行 `dependency_index.py sync --project {arguments.project}`。") from error
-    except json.JSONDecodeError as error:
-        raise IndexError(f"依赖索引 JSON 无效：{path}：{error}") from error
-    if not isinstance(value, dict) or value.get("schemaVersion") != INDEX_SCHEMA_VERSION:
+        create_schema(connection)
+        connection.execute("BEGIN")
+        for project_data in raw["projects"]:
+            connection.execute("INSERT INTO modules(path, name) VALUES (?, ?)", (str(project_data.get("path", "")), str(project_data.get("name", ""))))
+            for config in project_data.get("configurations", []):
+                cursor = connection.execute("INSERT INTO configurations(module_path, name, status) VALUES (?, ?, ?)", (str(project_data.get("path", "")), str(config.get("name", "")), str(config.get("status", "unknown"))))
+                config_id = cursor.lastrowid
+                for dependency in config.get("dependencies", []):
+                    connection.execute("INSERT INTO dependencies(configuration_id, kind, requested, selected, failure) VALUES (?, ?, ?, ?, NULL)", (config_id, str(dependency.get("kind", "")), str(dependency.get("requested", "")), str(dependency.get("selected", ""))))
+                for failure in config.get("failures", []):
+                    connection.execute("INSERT INTO dependencies(configuration_id, kind, requested, selected, failure) VALUES (?, 'failed', '', '', ?)", (config_id, compact_text(str(failure), 500)))
+                for artifact in config.get("artifacts", []):
+                    identifier = artifact_id(artifact)
+                    if connection.execute("SELECT 1 FROM artifacts WHERE id = ?", (identifier,)).fetchone() is None:
+                        raw_artifact, repositories = unique[identifier]
+                        insert_artifact(connection, raw_artifact, homes, repositories, not arguments.no_api, connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0] + 1, len(unique))
+                    connection.execute("INSERT OR IGNORE INTO configuration_artifacts(configuration_id, artifact_id) VALUES (?, ?)", (config_id, identifier))
+        current_fingerprint = fingerprint(project)
+        metadata_entries = {
+            "schemaVersion": str(INDEX_SCHEMA_VERSION), "toolVersion": TOOL_VERSION, "projectPath": str(project),
+            "fingerprint": current_fingerprint["sha256"], "fingerprintFiles": json.dumps(current_fingerprint["files"], ensure_ascii=False, separators=(",", ":")),
+            "gradleVersion": str(raw.get("gradleVersion", "")), "createdAtEpoch": str(int(time.time())),
+        }
+        connection.executemany("INSERT INTO metadata(key, value) VALUES (?, ?)", metadata_entries.items())
+        print("[4/4] 正在完成 SQLite 索引写入…", flush=True)
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
+    finally:
+        connection.close()
+    temporary.replace(database)
+
+
+def load_database(arguments: argparse.Namespace) -> sqlite3.Connection:
+    connection = open_database(index_path(arguments.state))
+    values = metadata(connection)
+    if values.get("schemaVersion") != str(INDEX_SCHEMA_VERSION):
+        connection.close()
         raise IndexError("依赖索引版本不兼容；请重新运行 sync。")
-    return value
+    return connection
 
 
-def stale_reason(index: dict[str, Any], project: Path) -> str | None:
-    indexed = index.get("project", {}).get("fingerprint", {}).get("sha256")
-    current = fingerprint(project).get("sha256")
-    if indexed != current:
+def stale_reason(connection: sqlite3.Connection, project: Path) -> str | None:
+    if metadata(connection).get("fingerprint") != fingerprint(project)["sha256"]:
         return "构建输入已变化，请重新运行 sync"
     return None
 
 
-def clamp(arguments: argparse.Namespace) -> tuple[int, int]:
-    limit = min(max(1, int(arguments.limit)), MAX_LIMIT)
-    offset = max(0, int(arguments.offset))
-    return limit, offset
-
-
-def paged(items: list[dict[str, Any]], arguments: argparse.Namespace) -> tuple[list[dict[str, Any]], int]:
-    limit, offset = clamp(arguments)
-    return items[offset:offset + limit], max(0, len(items) - offset - limit)
-
-
-def coordinate_text(artifact: dict[str, Any]) -> str:
-    coordinate = artifact.get("coordinate")
-    if not coordinate:
-        return artifact.get("fileName", "未知文件")
-    return f"{coordinate['group']}:{coordinate['artifact']}:{coordinate['version']}"
-
-
-def command_sync(arguments: argparse.Namespace) -> int:
-    index = build_index(arguments)
-    write_json(index_path(arguments.state), index)
-    artifacts = list(index["artifacts"].values())
-    configuration_count = sum(len(module["configurations"]) for module in index["modules"])
-    class_count = sum(len(item.get("classes", [])) for item in artifacts)
-    api_count = sum(len(item.get("api", [])) for item in artifacts)
-    unavailable = sum(1 for item in artifacts if item.get("apiStatus") in {"unavailable", "javadoc-only"})
-    failures = sum(1 for module in index["modules"] for config in module["configurations"] if config["status"] != "ok")
-    print(f"已同步：模块 {len(index['modules'])}，配置 {configuration_count}，构件 {len(artifacts)}，类 {class_count}，公开签名 {api_count}，资料缺失 {unavailable}，失败 {failures}")
-    return 0
-
-
-def command_status(arguments: argparse.Namespace) -> int:
-    index = load_index(arguments)
-    project = normalize_project(arguments.project)
-    reason = stale_reason(index, project)
-    artifacts = list(index["artifacts"].values())
-    data = {
-        "status": "stale" if reason else "ready", "reason": reason,
-        "modules": len(index["modules"]), "artifacts": len(artifacts),
-        "classes": sum(len(item.get("classes", [])) for item in artifacts),
-        "members": sum(len(item.get("api", [])) for item in artifacts),
-        "withoutSources": sum(1 for item in artifacts if item.get("apiStatus") not in {"sources", "sources-only"}),
-    }
-    if arguments.json:
-        print(json.dumps(data, ensure_ascii=False, separators=(",", ":")))
-    else:
-        suffix = f"；{reason}" if reason else ""
-        print(f"索引 {data['status']}：模块 {data['modules']}，构件 {data['artifacts']}，类 {data['classes']}，公开签名 {data['members']}，无源码资料 {data['withoutSources']}{suffix}")
-    return 1 if reason else 0
-
-
-def require_fresh(arguments: argparse.Namespace, index: dict[str, Any]) -> None:
-    reason = stale_reason(index, normalize_project(arguments.project))
+def require_fresh(connection: sqlite3.Connection, arguments: argparse.Namespace) -> None:
+    reason = stale_reason(connection, normalize_project(arguments.project))
     if reason:
         raise IndexError(f"索引已过期：{reason}。")
 
 
-def command_modules(arguments: argparse.Namespace) -> int:
-    index = load_index(arguments)
-    require_fresh(arguments, index)
-    rows = [{"module": item["path"], "configurations": len(item["configurations"])} for item in index["modules"]]
-    selected, remaining = paged(rows, arguments)
+def clamp(arguments: argparse.Namespace) -> tuple[int, int]:
+    return min(max(1, int(arguments.limit)), MAX_LIMIT), max(0, int(arguments.offset))
+
+
+def emit(items: list[dict[str, Any]], total: int, arguments: argparse.Namespace) -> None:
+    limit, offset = clamp(arguments)
+    selected = items[:limit]
+    remaining = max(0, total - offset - len(selected))
     if arguments.json:
-        print(json.dumps({"count": len(rows), "items": selected, "remaining": remaining}, ensure_ascii=False, separators=(",", ":")))
+        print(json.dumps({"count": total, "items": selected, "remaining": remaining}, ensure_ascii=False, separators=(",", ":")))
     else:
-        print(f"模块 {len(rows)}")
-        for row in selected:
-            print(f"{row['module']} | 配置 {row['configurations']}")
-        print_remaining(remaining, arguments)
+        for item in selected:
+            print(item["text"])
+        if remaining:
+            print(f"其余 {remaining} 条；使用更精确关键词或 --offset {offset + limit}")
+
+
+def command_sync(arguments: argparse.Namespace) -> int:
+    build_database(arguments, index_path(arguments.state))
+    connection = load_database(arguments)
+    try:
+        counts = {name: connection.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0] for name in ("modules", "configurations", "artifacts", "classes", "api")}
+        missing = connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status IN ('unavailable', 'javadoc-only')").fetchone()[0]
+        failed = connection.execute("SELECT COUNT(*) FROM configurations WHERE status != 'ok'").fetchone()[0]
+    finally:
+        connection.close()
+    print(f"已同步：模块 {counts['modules']}，配置 {counts['configurations']}，构件 {counts['artifacts']}，类 {counts['classes']}，公开签名 {counts['api']}，资料缺失 {missing}，失败 {failed}")
+    return 0
+
+
+def command_status(arguments: argparse.Namespace) -> int:
+    connection = load_database(arguments)
+    try:
+        reason = stale_reason(connection, normalize_project(arguments.project))
+        data = {"status": "stale" if reason else "ready", "reason": reason, "modules": connection.execute("SELECT COUNT(*) FROM modules").fetchone()[0], "artifacts": connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0], "classes": connection.execute("SELECT COUNT(*) FROM classes").fetchone()[0], "members": connection.execute("SELECT COUNT(*) FROM api").fetchone()[0], "withoutSources": connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status NOT IN ('sources', 'sources-only')").fetchone()[0]}
+    finally:
+        connection.close()
+    print(json.dumps(data, ensure_ascii=False, separators=(",", ":")) if arguments.json else f"SQLite 索引 {data['status']}：模块 {data['modules']}，构件 {data['artifacts']}，类 {data['classes']}，公开签名 {data['members']}，无源码资料 {data['withoutSources']}{'；' + reason if reason else ''}")
+    return 1 if reason else 0
+
+
+def command_modules(arguments: argparse.Namespace) -> int:
+    connection = load_database(arguments)
+    try:
+        require_fresh(connection, arguments)
+        limit, offset = clamp(arguments)
+        total = connection.execute("SELECT COUNT(*) FROM modules").fetchone()[0]
+        rows = connection.execute("SELECT m.path, COUNT(c.id) configurations FROM modules m LEFT JOIN configurations c ON c.module_path=m.path GROUP BY m.path ORDER BY m.path LIMIT ? OFFSET ?", (limit, offset)).fetchall()
+        emit([{"module": row["path"], "configurations": row["configurations"], "text": f"{row['path']} | 配置 {row['configurations']}"} for row in rows], total, arguments)
+    finally:
+        connection.close()
     return 0
 
 
 def command_dependencies(arguments: argparse.Namespace) -> int:
-    index = load_index(arguments)
-    require_fresh(arguments, index)
-    module = next((item for item in index["modules"] if item["path"] == arguments.module), None)
-    if not module:
-        raise IndexError(f"未找到模块：{arguments.module}")
-    rows: list[dict[str, Any]] = []
-    for config in module["configurations"]:
-        if arguments.configuration and config["name"] != arguments.configuration:
-            continue
-        for artifact_id in config["artifacts"]:
-            artifact = index["artifacts"].get(artifact_id, {})
-            rows.append({"module": module["path"], "configuration": config["name"], "dependency": coordinate_text(artifact), "kind": "artifact"})
+    connection = load_database(arguments)
+    try:
+        require_fresh(connection, arguments)
+        limit, offset = clamp(arguments)
+        where = "c.module_path = ?" + (" AND c.name = ?" if arguments.configuration else "")
+        params: list[Any] = [arguments.module] + ([arguments.configuration] if arguments.configuration else [])
+        artifacts = f"SELECT c.name configuration, 'artifact' kind, COALESCE(a.group_name || ':' || a.artifact_name || ':' || a.version, a.file_name) dependency FROM configurations c JOIN configuration_artifacts ca ON ca.configuration_id=c.id JOIN artifacts a ON a.id=ca.artifact_id WHERE {where}"
         if arguments.transitive:
-            for dependency in config.get("dependencies", []):
-                rows.append({"module": module["path"], "configuration": config["name"], "dependency": dependency.get("selected") or dependency.get("requested"), "kind": dependency.get("kind")})
-        for failure in config.get("failures", []):
-            rows.append({"module": module["path"], "configuration": config["name"], "dependency": compact_text(str(failure), 160), "kind": "failed"})
-    rows.sort(key=lambda row: (row["configuration"], row["dependency"], row["kind"]))
-    selected, remaining = paged(rows, arguments)
-    if arguments.json:
-        print(json.dumps({"count": len(rows), "items": selected, "remaining": remaining}, ensure_ascii=False, separators=(",", ":")))
-    else:
-        print(f"{module['path']} 依赖 {len(rows)}")
-        for row in selected:
-            print(f"{row['configuration']} | {row['dependency']} | {row['kind']}")
-        print_remaining(remaining, arguments)
+            edges = f"SELECT c.name configuration, d.kind kind, COALESCE(NULLIF(d.selected,''), NULLIF(d.requested,''), d.failure) dependency FROM configurations c JOIN dependencies d ON d.configuration_id=c.id WHERE {where}"
+            union = f"{artifacts} UNION ALL {edges}"
+            union_params = [*params, *params]
+        else:
+            union = artifacts
+            union_params = params
+        total = connection.execute(f"SELECT COUNT(*) FROM ({union})", union_params).fetchone()[0]
+        rows = connection.execute(f"SELECT * FROM ({union}) ORDER BY configuration, dependency, kind LIMIT ? OFFSET ?", (*union_params, limit, offset)).fetchall()
+        emit([{"configuration": row["configuration"], "dependency": row["dependency"], "kind": row["kind"], "text": f"{row['configuration']} | {row['dependency']} | {row['kind']}"} for row in rows], total, arguments)
+    finally:
+        connection.close()
     return 0
 
 
-def matching_artifacts(index: dict[str, Any], query: str) -> Iterable[dict[str, Any]]:
-    normalized = query.casefold()
-    for artifact in index["artifacts"].values():
-        yield artifact
-
-
 def command_classes(arguments: argparse.Namespace) -> int:
-    index = load_index(arguments)
-    require_fresh(arguments, index)
-    query = arguments.query.casefold()
-    rows = []
-    for artifact in index["artifacts"].values():
-        for item in artifact.get("classes", []):
-            if query in item["name"].casefold() or query in item["binaryName"].casefold():
-                rows.append({"class": item["name"], "artifact": coordinate_text(artifact), "binaryName": item["binaryName"], "id": artifact["id"]})
-    rows.sort(key=lambda item: (item["class"], item["artifact"]))
-    selected, remaining = paged(rows, arguments)
-    if arguments.json:
-        print(json.dumps({"count": len(rows), "items": selected, "remaining": remaining}, ensure_ascii=False, separators=(",", ":")))
-    else:
-        print(f"类命中 {len(rows)}")
-        for row in selected:
-            print(f"{row['class']} | {row['artifact']}")
+    connection = load_database(arguments)
+    try:
+        require_fresh(connection, arguments)
+        limit, offset = clamp(arguments)
+        search = fts_query(arguments.query)
+        total = connection.execute("SELECT COUNT(*) FROM class_search WHERE class_search MATCH ?", (search,)).fetchone()[0]
+        rows = connection.execute("SELECT c.name, c.binary_name, a.group_name, a.artifact_name, a.version FROM class_search s JOIN classes c ON c.id=s.class_id JOIN artifacts a ON a.id=c.artifact_id WHERE class_search MATCH ? ORDER BY c.name LIMIT ? OFFSET ?", (search, limit, offset)).fetchall()
+        items = []
+        for row in rows:
+            gav = f"{row['group_name']}:{row['artifact_name']}:{row['version']}" if row['group_name'] else "未知构件"
+            item = {"class": row["name"], "artifact": gav, "text": f"{row['name']} | {gav}"}
             if arguments.verbose:
-                print(f"  二进制名 {row['binaryName']} | 构件 {row['id'][:12]}")
-        print_remaining(remaining, arguments)
-    return 0 if rows else 1
+                item["binaryName"] = row["binary_name"]
+            items.append(item)
+        emit(items, total, arguments)
+    finally:
+        connection.close()
+    return 0 if total else 1
 
 
-def type_ancestors(artifacts: dict[str, dict[str, Any]], requested: str) -> dict[str, int]:
-    """返回请求类型和其已索引父类/接口，值为从请求类型起的距离。"""
-    by_name: dict[str, set[str]] = {}
-    parents: dict[str, list[str]] = {}
-    for artifact in artifacts.values():
-        for item in artifact.get("api", []):
-            if item.get("kind") != "type":
-                continue
-            owner = str(item.get("owner", ""))
-            if not owner:
-                continue
-            by_name.setdefault(owner.rsplit(".", 1)[-1], set()).add(owner)
-            parents[owner] = [str(value) for value in item.get("supertypes", [])]
-    seeds = {requested} if "." in requested else by_name.get(requested, set())
+def ancestor_distances(connection: sqlite3.Connection, requested: str) -> dict[str, int]:
+    if "." in requested:
+        seeds = [requested]
+    else:
+        seeds = [row[0] for row in connection.execute("SELECT DISTINCT owner FROM api WHERE kind='type' AND substr(owner, instr(owner, '.') + 1) LIKE ?", (f"%.{requested}",))]
+        if not seeds:
+            seeds = [row[0] for row in connection.execute("SELECT DISTINCT owner FROM api WHERE kind='type' AND owner LIKE ?", (f"%.{requested}",))]
     found: dict[str, int] = {}
     pending = [(seed, 0) for seed in seeds]
     while pending:
@@ -753,70 +747,64 @@ def type_ancestors(artifacts: dict[str, dict[str, Any]], requested: str) -> dict
         if current in found and found[current] <= distance:
             continue
         found[current] = distance
-        for parent in parents.get(current, []):
-            candidates = {parent} if "." in parent else by_name.get(parent, set())
-            pending.extend((candidate, distance + 1) for candidate in candidates)
+        pending.extend((row[0], distance + 1) for row in connection.execute("SELECT parent_owner FROM type_edges WHERE child_owner=?", (current,)))
     return found
 
 
 def command_members(arguments: argparse.Namespace) -> int:
-    index = load_index(arguments)
-    require_fresh(arguments, index)
-    query = arguments.query.casefold()
-    visible_from = type_ancestors(index["artifacts"], arguments.type_name) if arguments.type_name else None
-    if arguments.type_name and not visible_from:
-        raise IndexError(f"索引中未找到类型：{arguments.type_name}")
-    rows = []
-    for artifact in index["artifacts"].values():
-        for item in artifact.get("api", []):
-            searchable = " ".join(str(item.get(key, "")) for key in ("owner", "name", "declaration"))
-            if query in searchable.casefold() and (visible_from is None or item.get("owner") in visible_from):
-                rows.append({"kind": item["kind"], "owner": item["owner"], "declaration": item["declaration"], "artifact": coordinate_text(artifact), "source": item["source"], "line": item["line"], "javadoc": item.get("javadoc"), "id": artifact["id"], "inheritanceDistance": visible_from.get(item["owner"], 0) if visible_from else 0})
-    rows.sort(key=lambda item: (item["inheritanceDistance"], item["owner"], item["declaration"], item["artifact"]))
-    selected, remaining = paged(rows, arguments)
-    if arguments.json:
-        print(json.dumps({"count": len(rows), "items": selected, "remaining": remaining}, ensure_ascii=False, separators=(",", ":")))
-    else:
-        scope = f"；{arguments.type_name} 可见成员" if arguments.type_name else ""
-        print(f"公开 API 命中 {len(rows)}{scope}")
-        for row in selected:
-            inherited = "" if row["inheritanceDistance"] == 0 else f" | 继承 {row['inheritanceDistance']}"
-            print(f"{row['kind']} | 声明于 {row['owner']}{inherited} | {row['declaration']} | {row['artifact']} | {row['source']}:{row['line']}")
+    connection = load_database(arguments)
+    try:
+        require_fresh(connection, arguments)
+        limit, offset = clamp(arguments)
+        search = fts_query(arguments.query)
+        visible = ancestor_distances(connection, arguments.type_name) if arguments.type_name else None
+        if arguments.type_name and not visible:
+            raise IndexError(f"索引中未找到类型：{arguments.type_name}")
+        if visible is None:
+            total = connection.execute("SELECT COUNT(*) FROM api_search WHERE api_search MATCH ?", (search,)).fetchone()[0]
+            rows = connection.execute("SELECT a.*, r.group_name, r.artifact_name, r.version FROM api_search s JOIN api a ON a.id=s.api_id JOIN artifacts r ON r.id=a.artifact_id WHERE api_search MATCH ? ORDER BY a.owner, a.declaration LIMIT ? OFFSET ?", (search, limit, offset)).fetchall()
+        else:
+            placeholders = ",".join("?" for _ in visible)
+            values = [search, *visible.keys()]
+            total = connection.execute(f"SELECT COUNT(*) FROM api_search s JOIN api a ON a.id=s.api_id WHERE api_search MATCH ? AND a.owner IN ({placeholders})", values).fetchone()[0]
+            rows = connection.execute(f"SELECT a.*, r.group_name, r.artifact_name, r.version FROM api_search s JOIN api a ON a.id=s.api_id JOIN artifacts r ON r.id=a.artifact_id WHERE api_search MATCH ? AND a.owner IN ({placeholders}) ORDER BY a.owner, a.declaration LIMIT ? OFFSET ?", (*values, limit, offset)).fetchall()
+        items = []
+        for row in rows:
+            gav = f"{row['group_name']}:{row['artifact_name']}:{row['version']}" if row['group_name'] else "未知构件"
+            distance = visible.get(row["owner"], 0) if visible else 0
+            inherited = "" if distance == 0 else f" | 继承 {distance}"
+            item = {"kind": row["kind"], "owner": row["owner"], "declaration": row["declaration"], "artifact": gav, "source": row["source_path"], "line": row["source_line"], "inheritanceDistance": distance, "text": f"{row['kind']} | 声明于 {row['owner']}{inherited} | {row['declaration']} | {gav} | {row['source_path']}:{row['source_line']}"}
             if arguments.verbose:
-                javadoc = row.get("javadoc")
-                print(f"  Javadoc {javadoc.get('path') if javadoc else '无'} | 构件 {row['id'][:12]}")
-        print_remaining(remaining, arguments)
-    return 0 if rows else 1
+                item["documentation"] = row["documentation"]
+                item["javadoc"] = row["javadoc_path"]
+            items.append(item)
+        emit(items, total, arguments)
+    finally:
+        connection.close()
+    return 0 if total else 1
 
 
 def command_show(arguments: argparse.Namespace) -> int:
-    index = load_index(arguments)
-    require_fresh(arguments, index)
-    query = arguments.artifact.casefold()
-    matches = [item for item in index["artifacts"].values() if query in coordinate_text(item).casefold() or item["id"].startswith(query) or query in str(item.get("fileName", "")).casefold()]
-    matches.sort(key=coordinate_text)
-    selected, remaining = paged(matches, arguments)
-    if arguments.json:
-        result = [{"artifact": coordinate_text(item), "classes": len(item.get("classes", [])), "members": len(item.get("api", [])), "apiStatus": item.get("apiStatus"), "sha256": item.get("sha256")} for item in selected]
-        print(json.dumps({"count": len(matches), "items": result, "remaining": remaining}, ensure_ascii=False, separators=(",", ":")))
-    else:
-        print(f"构件命中 {len(matches)}")
-        for item in selected:
-            print(f"{coordinate_text(item)} | 类 {len(item.get('classes', []))} | 公开签名 {len(item.get('api', []))} | {item.get('apiStatus')}")
+    connection = load_database(arguments)
+    try:
+        require_fresh(connection, arguments)
+        limit, offset = clamp(arguments)
+        query = arguments.artifact.casefold()
+        rows = connection.execute("SELECT a.*, (SELECT COUNT(*) FROM classes c WHERE c.artifact_id=a.id) classes, (SELECT COUNT(*) FROM api p WHERE p.artifact_id=a.id) members FROM artifacts a WHERE lower(COALESCE(a.group_name || ':' || a.artifact_name || ':' || a.version, a.file_name)) LIKE ? OR lower(a.id) LIKE ? ORDER BY a.group_name, a.artifact_name LIMIT ? OFFSET ?", (f"%{query}%", f"{query}%", limit, offset)).fetchall()
+        total = connection.execute("SELECT COUNT(*) FROM artifacts a WHERE lower(COALESCE(a.group_name || ':' || a.artifact_name || ':' || a.version, a.file_name)) LIKE ? OR lower(a.id) LIKE ?", (f"%{query}%", f"{query}%")).fetchone()[0]
+        items = []
+        for row in rows:
+            gav = coordinate_text(row)
+            item = {"artifact": gav, "classes": row["classes"], "members": row["members"], "apiStatus": row["api_status"], "sha256": row["sha256"], "text": f"{gav} | 类 {row['classes']} | 公开签名 {row['members']} | {row['api_status']}"}
             if arguments.verbose:
-                print(f"  SHA-256 {item.get('sha256')} | 文件 {item.get('file')}")
-                if item.get("sources"):
-                    print(f"  sources {item['sources']['source']}")
-                if item.get("javadoc"):
-                    print(f"  javadoc {item['javadoc']['source']}")
-        print_remaining(remaining, arguments)
-    return 0 if matches else 1
-
-
-def print_remaining(remaining: int, arguments: argparse.Namespace) -> None:
-    if remaining:
-        next_offset = max(0, arguments.offset) + min(max(1, arguments.limit), MAX_LIMIT)
-        print(f"其余 {remaining} 条；使用更精确关键词或 --offset {next_offset}")
+                item["file"] = row["file_path"]
+                item["sources"] = row["sources_source"]
+                item["javadoc"] = row["javadoc_source"]
+            items.append(item)
+        emit(items, total, arguments)
+    finally:
+        connection.close()
+    return 0 if total else 1
 
 
 def zoo_template() -> Path:
@@ -826,15 +814,13 @@ def zoo_template() -> Path:
 def command_install_zoo(arguments: argparse.Namespace) -> int:
     project = normalize_project(arguments.project)
     source = zoo_template()
+    destination = project / ".roo" / "tools" / "pluginbase-dependency-index.ts"
     if not source.is_file():
         raise IndexError(f"找不到 Zoo 工具模板：{source}")
-    destination = project / ".roo" / "tools" / "pluginbase-dependency-index.ts"
     if destination.exists() and not arguments.force:
         print(f"保留已有 Zoo 工具：{destination}")
         return 0
-    action = "覆盖" if destination.exists() else "创建"
-    prefix = "预览" if arguments.dry_run else ""
-    print(f"{prefix}{action} Zoo 工具：{destination}")
+    print(f"{'预览' if arguments.dry_run else ''}{'覆盖' if destination.exists() else '创建'} Zoo 工具：{destination}")
     if not arguments.dry_run:
         destination.parent.mkdir(parents=True, exist_ok=True)
         shutil.copyfile(source, destination)
@@ -844,23 +830,8 @@ def command_install_zoo(arguments: argparse.Namespace) -> int:
 def main() -> int:
     arguments = parser().parse_args()
     try:
-        if arguments.command == "sync":
-            return command_sync(arguments)
-        if arguments.command == "status":
-            return command_status(arguments)
-        if arguments.command == "modules":
-            return command_modules(arguments)
-        if arguments.command == "dependencies":
-            return command_dependencies(arguments)
-        if arguments.command == "classes":
-            return command_classes(arguments)
-        if arguments.command == "members":
-            return command_members(arguments)
-        if arguments.command == "show":
-            return command_show(arguments)
-        if arguments.command == "install-zoo":
-            return command_install_zoo(arguments)
-        raise IndexError(f"未知命令：{arguments.command}")
+        handlers = {"sync": command_sync, "status": command_status, "modules": command_modules, "dependencies": command_dependencies, "classes": command_classes, "members": command_members, "show": command_show, "install-zoo": command_install_zoo}
+        return handlers[arguments.command](arguments)
     except EvidenceError as error:
         print_error(str(error))
         return 2

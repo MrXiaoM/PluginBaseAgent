@@ -29,7 +29,7 @@ description: Guides development, maintenance, review, and version upgrades of Gr
 2. 原样记录用户指定的 Minecraft 版本；不得将 `1.21.11` 改为 `1.21.1`，不得把 `26.2` 改为旧式版本格式。若对版本命名有疑问，按 `agent-dev/docs/server-api/minecraft-version-integrity.md` 使用原样版本号查询 Wiki。
 3. 默认选择 Spigot API。只有用户明确选择 Paper，或目标项目已验证需要 Paper 专有能力时才进入 Paper 路径；PluginBase 的 `paper` 模块用于 Spigot/Paper 双端物品/库存工厂回退，不等于可直接调用 Paper API。
 4. 初始化或查询 PluginBase 资料时，读取 `build.gradle.kts` 中 `top.mrxiaom:LibrariesResolver-Gradle` 的精确版本；它是全部 PluginBase 模块的统一版本锚点。从 `pluginBaseModules` 识别实际启用模块，并只用该统一版本同步这些模块。不得逐个猜测、探测或预先获取未启用模块的版本。
-5. 遇到陌生 Gradle 依赖时，先检查 `agent-dev/tools/dependency_index.py status --project .`；索引缺失或过期时显式运行 `sync --project .`，再查询模块、构件、类和公开签名。已知接收者类型时，优先使用 `members <成员> --type <类型>`，使搜索沿 `extends`/`implements` 链报告真实声明处，不要反复执行 `javap`。
+5. 遇到陌生 Gradle 依赖时，先检查 `agent-dev/tools/dependency_index.py status --project .`；索引缺失或过期时显式运行 `sync --project .`。它以 SQLite/FTS 按需查询，流式处理 Gradle 缓存中的 sources/Javadoc 且实时显示阶段/构件进度，不复制或解包完整归档。再查询模块、构件、类和公开签名；已知接收者类型时，优先使用 `members <成员> --type <类型>`，使搜索沿 `extends`/`implements` 链报告真实声明处，不要反复执行 `javap`。
 6. 在使用版本敏感的 Bukkit、Spigot、Paper、PluginBase、外部插件或 NMS 符号前，先运行项目内资料工具并记录证据：
     - `python agent-dev/tools/api_evidence.py sync/query ...`
     - `python agent-dev/tools/pluginbase_evidence.py sync/query ...`

@@ -28,9 +28,9 @@
 ```text
 state/
   environment.json # 机器本地环境配置；首次安装创建，不分发、不提交
-  downloads/       # 下载或从 Gradle 缓存复用的原始 sources/Javadoc 归档
-  evidence/        # 安全解包后的源码与 Javadoc
-  indexes/         # 可重建的依赖、类名、公开 API 与继承关系索引
+  downloads/       # 取证工具专用的原始 sources/Javadoc 归档
+  evidence/        # 取证工具安全解包后的源码与 Javadoc
+  indexes/         # 紧凑 SQLite 依赖、类名、公开 API 与继承关系索引
   records/         # 本地查询输出和临时证据记录
 ```
 
@@ -41,7 +41,7 @@ state/
 - 不把任何内容打进插件 JAR；
 - 不提交 `state/` 的下载归档、解包资料、索引或临时记录；
 - 需要长期保留的结论，应转写成精简 Markdown 证据记录，包含坐标、版本、哈希和必要签名，而不是提交整份第三方归档；
-- `indexes/dependency-index.json` 与其构件 sources/Javadoc 缓存可随 Gradle 构建输入、Wrapper、锁文件或归档哈希变化重建，不应提交。
+- `indexes/dependency-index.sqlite3` 可随 Gradle 构建输入、Wrapper、锁文件或归档哈希变化重建，不应提交；依赖索引会流式读取 Gradle 缓存或临时下载的归档，只保存签名和短文档摘要，不保存 sources/Javadoc 副本或解包树。
 
 项目根 `.gitignore` 应包含：
 

@@ -42,7 +42,7 @@ PluginBase 资料默认从 Maven Central 的 `top.mrxiaom.pluginbase` 坐标下�
 
 ## `dependency_index.py`
 
-用于从**目标项目自己的 Gradle Wrapper**取得真实的多模块解析结果，并在 `state/indexes/` 建立依赖、JAR 类名和公开 Java API 签名索引。它不解析 `build.gradle.kts` 文本来猜测依赖，也不会修改目标构建文件；临时 Gradle init script 在命令结束后删除。
+用于从**目标项目自己的 Gradle Wrapper**取得真实的多模块解析结果，并在 `state/indexes/dependency-index.sqlite3` 建立依赖、JAR 类名、公开 Java API 签名与继承关系索引。它不解析 `build.gradle.kts` 文本来猜测依赖，也不会修改目标构建文件；临时 Gradle init script 在命令结束后删除。
 
 ```text
 python agent-dev/tools/dependency_index.py sync --project .
@@ -55,7 +55,7 @@ python agent-dev/tools/dependency_index.py members --project . addItem --type Pl
 python agent-dev/tools/dependency_index.py show --project . --artifact <GAV或哈希前缀>
 ```
 
-`sync` 对每个可解析 Gradle 配置记录解析后的构件、项目/传递依赖边和失败项；扫描实际 JAR 类路径，并按项目锁定 GAV 从已配置 Gradle 缓存或公开 Maven 仓库取得同版本 `sources.jar`、`javadoc.jar`，索引公开 Java 类型、构造器、方法和字段。`--no-api` 可只同步依赖与类名；没有 Java sources、只有 Javadoc 或语言/文档结构无法可靠解析时，状态会明确标记为不完整，不能视为完整 API 证明。
+`sync` 对每个可解析 Gradle 配置记录解析后的构件、项目/传递依赖边和失败项；扫描实际 JAR 类路径，并按项目锁定 GAV 流式读取同版本 `sources.jar`、`javadoc.jar`，索引公开 Java 类型、构造器、方法、字段、继承关系与短文档摘要。它不会复制或解包整个归档；缓存未命中时仅临时下载并在处理后删除。SQLite `FTS5` 让类/成员查询按需执行，不会加载整份索引。同步会实时显示 Gradle 解析、构件计数、当前构件、sources/Javadoc 摘要和最终写入进度。`--no-api` 可只同步依赖与类名；没有 Java sources、只有 Javadoc 或语言/文档结构无法可靠解析时，状态会明确标记为不完整，不能视为完整 API 证明。
 
 查询默认最多输出 `8` 条，格式紧凑；`dependencies` 默认只列已解析构件，传递依赖边需显式加 `--transitive`。`classes` 和未限定的 `members` 都是模糊搜索；已知调用者类型时使用 `members <成员> --type <类型>`，它会沿已索引 `extends`/`implements` 链定位成员声明，并标注继承距离。使用 `--limit`、`--offset` 分页，使用 `--verbose` 查看路径、哈希与来源，使用 `--json` 供自动化工具调用。索引过期、缺失或解析失败时，查询不会静默重同步；先执行 `sync`，再根据 `sources`/Javadoc 命中复核版本敏感调用的签名、弃用、线程与语义。
 

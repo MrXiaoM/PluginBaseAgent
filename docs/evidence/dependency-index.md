@@ -12,20 +12,22 @@ python agent-dev/tools/dependency_index.py sync --project .
 
 工具必须找到项目自己的 `gradlew` 或 `gradlew.bat`，并临时注入 Gradle init script，收集所有 Gradle 子项目及每个可解析配置的真实解析结果。它不读取 `build.gradle.kts` 文本来推测依赖，也不会写入项目构建文件。
 
-索引保存于本机 `agent-dev/state/indexes/dependency-index.json`，包括：
+索引保存于本机 `agent-dev/state/indexes/dependency-index.sqlite3`，包括：
 
 - Gradle 模块、可解析配置、解析后的构件、依赖边与失败项；
 - 实际 JAR 的 `SHA-256`、类名与二进制内部类名；
-- 对有精确 GAV 的构件，匹配版本 `sources.jar` 与 `javadoc.jar` 的来源、哈希和解包路径；
-- Java sources 中可识别的公开类型、构造器、方法、字段，以及 source 行号和可用的 Javadoc 页面路径。
+- 对有精确 GAV 的构件，匹配版本 `sources.jar` 与 `javadoc.jar` 的来源和哈希；
+- Java sources 中可识别的公开类型、构造器、方法、字段、继承关系、source 行号，以及最多 `420` 字符的类/成员 Javadoc 摘要。
 
-默认同步公开 API。若只需先查看依赖/类名，可使用 `--no-api`；此时成员查询不会有完整结果。没有 Java sources、只有 Javadoc、或源语言/文档结构不适合可靠解析时，索引会显示资料不足，不得把无结果解释为成员不存在。
+同步使用 Python 标准库 `sqlite3` 批量写入，类与成员使用 SQLite `FTS5` 按需检索；查询只读取匹配的受限结果，不会将整份索引 JSON 载入内存。终端会持续显示 `1/4` 至 `4/4` 阶段、当前构件序号，并在单个 sources 归档中每处理 `200` 个 Java 文件刷新 `公开 API 文件 N/M` 进度，避免长时间无输出。
+
+默认同步公开 API。工具直接从 Gradle 缓存原地流式读取 `sources.jar` 和 `javadoc.jar`；缓存未命中时只下载到临时文件，处理后立即删除。它不会复制归档、解包 HTML/JS/CSS/图片，也不会把完整 Javadoc 保存到 `state/`。若只需先查看依赖/类名，可使用 `--no-api`；此时成员查询不会有完整结果。没有 Java sources、只有 Javadoc、或源语言/文档结构不适合可靠解析时，索引会显示资料不足，不得把无结果解释为成员不存在。
 
 ## 缓存与安全边界
 
-索引和归档都属于 `agent-dev/state/`，不提交、不分发、不参与插件构建或 Shadow。`state/environment.json` 存在时，工具只使用其中的 `gradleUserHomes`；未填写或无效时停止，绝不自行扫描默认 C 盘缓存。`--gradle-user-home` 仅为单次覆盖。
+SQLite 索引属于 `agent-dev/state/`，不提交、不分发、不参与插件构建或 Shadow。`state/environment.json` 存在时，工具只使用其中的 `gradleUserHomes`；未填写或无效时停止，绝不自行扫描默认 C 盘缓存。`--gradle-user-home` 仅为单次覆盖。
 
-同步会先复用实际 Gradle 缓存中的匹配 `sources.jar`/`javadoc.jar`，再按目标项目仓库与 Maven Central 下载。每个归档和二进制 JAR 均记录哈希。对没有有效 Maven 坐标的项目/文件依赖，工具仍可索引实际 JAR 类名，但无法猜测或下载相应 sources/Javadoc。
+同步先原地复用实际 Gradle 缓存中的匹配 `sources.jar`/`javadoc.jar`，再按目标项目仓库与 Maven Central 临时下载。每个归档和二进制 JAR 均记录哈希，但原始归档不会进入索引状态。对没有有效 Maven 坐标的项目/文件依赖，工具仍可索引实际 JAR 类名，但无法猜测或下载相应 sources/Javadoc。首次 SQLite 同步会自动清理旧版 `dependency-index.json` 和 `indexes/artifacts/` 中由旧工具遗留的归档/解包内容。
 
 构建脚本、设置脚本、版本目录、锁文件或 Wrapper 内容变化会使索引过期。查询不会自动执行 Gradle；先显式重新运行 `sync`，避免在一次小查询中意外解析、下载或变更环境。
 
