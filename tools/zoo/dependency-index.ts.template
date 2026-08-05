@@ -1,0 +1,61 @@
+import { parametersSchema as z, defineCustomTool } from "@roo-code/types"
+import { execFile } from "child_process"
+import path from "path"
+import { promisify } from "util"
+
+const execFileAsync = promisify(execFile)
+const workspaceRoot = process.cwd()
+const cliPath = path.join(workspaceRoot, "agent-dev", "tools", "dependency_index.py")
+
+async function runCli(args: string[]): Promise<string> {
+  try {
+    const { stdout, stderr } = await execFileAsync(
+      "python",
+      [cliPath, ...args, "--project", workspaceRoot, "--json"],
+      {
+        cwd: workspaceRoot,
+        windowsHide: true,
+        timeout: 30_000,
+        maxBuffer: 512 * 1024,
+      },
+    )
+    return stdout.trim() || stderr.trim() || "命令未返回结果。"
+  } catch (error: unknown) {
+    const detail = error as { stdout?: string; stderr?: string; message?: string }
+    return (detail.stdout || detail.stderr || detail.message || "依赖索引调用失败。").trim()
+  }
+}
+
+export default defineCustomTool({
+  name: "pluginbase_dependency_index",
+  description: "查询当前项目 agent-dev 的本地 Gradle 依赖索引。先用 CLI sync 同步；结果仅用于定位，写入版本敏感 API 前仍须复核 sources/Javadoc。",
+  parameters: z.object({
+    action: z.enum(["status", "modules", "dependencies", "classes", "members", "show"]).describe("查询操作"),
+    query: z.string().optional().describe("classes/members 查询文本，或 show 的构件 GAV/哈希前缀"),
+    module: z.string().optional().describe("dependencies 使用的 Gradle 模块路径，例如 : 或 :feature"),
+    type: z.string().optional().describe("members 的接收者类型；会沿继承链搜索可见成员"),
+    configuration: z.string().optional().describe("可选的 Gradle 配置名"),
+    transitive: z.boolean().optional().describe("dependencies 是否附带传递依赖边"),
+    limit: z.number().int().min(1).max(20).optional().describe("最大结果数，默认 8"),
+  }),
+  async execute({ action, query, module, type, configuration, transitive, limit }) {
+    const args = [action]
+    if (action === "classes" || action === "members") {
+      if (!query?.trim()) return "错误：此查询需要 query。"
+      args.push(query)
+      if (action === "members" && type?.trim()) args.push("--type", type)
+    }
+    if (action === "show") {
+      if (!query?.trim()) return "错误：show 需要 query。"
+      args.push("--artifact", query)
+    }
+    if (action === "dependencies") {
+      if (!module?.trim()) return "错误：dependencies 需要 module。"
+      args.push("--module", module)
+      if (configuration?.trim()) args.push("--configuration", configuration)
+      if (transitive) args.push("--transitive")
+    }
+    if (limit) args.push("--limit", String(limit))
+    return runCli(args)
+  },
+})

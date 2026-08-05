@@ -35,12 +35,12 @@ gradlew.bat build
 | Codex | `.agents/skills/minecraft-pluginbase-development/` |
 | OpenCode | `.opencode/skills/minecraft-pluginbase-development/` |
 
-## 4. 释放项目内开发包
+## 4. 初始化开发环境
 
-在插件项目根目录，按实际安装路径执行对应命令：
+在插件项目根目录，选择已安装的工具并执行**一条命令**：
 
 ```text
-# Roo Code
+# Roo / Zoo Code
 python .roo/skills/minecraft-pluginbase-development/scripts/install_kit.py --project .
 
 # Claude Code
@@ -53,24 +53,15 @@ python .agents/skills/minecraft-pluginbase-development/scripts/install_kit.py --
 python .opencode/skills/minecraft-pluginbase-development/scripts/install_kit.py --project .
 ```
 
-它会生成项目内 `agent-dev/`，其中包含 Agent 规范、资料查询工具、构件注册表和本地缓存目录，同时创建不会被后续安装覆盖的 `agent-dev/state/environment.json` 模板。
+从 Roo / Zoo Code 的 `.roo/skills/` 入口运行时，依赖索引工具会自动安装到 `./.roo/tools/`；随后在 Zoo Code 的 Experimental 设置启用 Custom Tools。
 
-## 5. 配置本机 Gradle 缓存
+完成后，确保项目根 `.gitignore` 包含：
 
-将 `agent-dev/state/` 加入项目根 `.gitignore`；它保存本地环境、本地下载和解包缓存，不能提交或打进插件 JAR。然后填写 `agent-dev/state/environment.json`：
-
-```json
-{
-  "schemaVersion": 1,
-  "gradleUserHomes": [
-    "I:/gradle-cache"
-  ]
-}
+```gitignore
+agent-dev/state/
 ```
 
-将示例路径替换为本机实际 Gradle 用户目录。资料工具在这个文件存在时只搜索 `gradleUserHomes`，不会自行扫描默认 C 盘目录；以后即使 AI 上下文恢复或换 Agent，也先读取该文件。需要单次临时覆盖时，命令可附加 `--gradle-user-home <目录>`。
-
-## 6. 开始开发
+## 5. 开始开发
 
 然后向已安装的 AI 工具发送一次以下提示词，完成项目资料环境初始化：
 

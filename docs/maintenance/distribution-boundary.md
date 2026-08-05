@@ -20,7 +20,7 @@
 | --- | --- | --- |
 | Spigot/Paper/PluginBase/第三方的 sources/Javadoc 归档 | 体积、许可证、版本漂移 | `agent-dev/state/downloads/` |
 | 已解包源码/Javadoc | 同上，且可由归档重建 | `agent-dev/state/evidence/` |
-| 全文索引和临时查询结果 | 可重建、可能随工具版本变化 | `agent-dev/state/indexes/`、`records/` |
+| Gradle 依赖、类名、公开 API 与继承关系索引，以及临时查询结果 | 可重建、可能随工具版本变化 | `agent-dev/state/indexes/`、`records/` |
 | Gradle 缓存 | 环境私有、体积大 | Gradle 用户目录，不复制 |
 | 服务端运行目录、世界数据、日志、数据库 | 项目外运行数据或敏感信息 | 服务端环境，不进入资料包 |
 | 密码、令牌、私有仓库凭据和真实生产连接串 | 安全敏感 | 仅安全配置渠道 |
@@ -39,9 +39,11 @@ agent-dev/state/
 
 1. 项目 `agent-dev/state/` 中版本和哈希匹配的现有资料；
 2. 用户显式提供的 Gradle 用户目录；
-3. `GRADLE_USER_HOME`；
-4. 运行环境默认 Gradle 用户目录；
-5. 注册表指定的公开 Maven 仓库。
+3. `agent-dev/state/environment.json` 的 `gradleUserHomes`；
+4. 只有 `environment.json` 不存在时，才读取 `GRADLE_USER_HOME` 与运行环境默认 Gradle 用户目录；
+5. 注册表或目标 Gradle 项目指定的公开 Maven 仓库。
+
+`environment.json` 一旦存在但为空或无效，工具必须停止，绝不改为扫描默认 C 盘缓存。
 
 工具不得把某台开发机的缓存路径写进文档、构建脚本或项目源码。联网下载前应输出将访问的 URL、目标坐标和落盘位置；下载后记录哈希。
 

@@ -15,12 +15,13 @@ python agent-dev/tools/<脚本>.py ...
 ```text
 python agent-dev/tools/api_evidence.py sync --api spigot --minecraft <用户原样版本>
 python agent-dev/tools/api_evidence.py sync --api paper --minecraft <用户原样版本>
-python agent-dev/tools/api_evidence.py query --api spigot --minecraft <用户原样版本> --symbol <类名或成员>
+python agent-dev/tools/api_evidence.py query --api spigot --minecraft <用户原样版本> --symbol <类名或成员关键词>
+python agent-dev/tools/api_evidence.py query --api spigot --minecraft <用户原样版本> --type PlayerInventory --member addItem
 python agent-dev/tools/api_evidence.py compare --api spigot --from <旧原样版本> --to <新原样版本> --symbol <类名或成员>
 python agent-dev/tools/api_evidence.py status
 ```
 
-`--minecraft` 是用户提供的 Minecraft 版本原样文本。工具不会将 `1.21.11` 改为 `1.21.1`，也不会将 `26.2` 补成其它旧式格式。若精确 Maven 构件版本与默认 `<minecraft>-R0.1-SNAPSHOT` 不同，显式传入 `--artifact-version`；映射依据必须写入证据记录。
+`--symbol` 是不区分大小写的文本搜索，适合先发现候选类型或成员。若已知接收者类型，优先使用 `--type <完整或简单类型名> --member <成员片段>`：工具会搜索该类型及其已解析的 `extends`/`implements` 链，并报告成员实际声明类型和继承距离。例如 `PlayerInventory` 本身不声明 `addItem`，但可从 `Inventory` 继承。`--minecraft` 是用户提供的 Minecraft 版本原样文本。工具不会将 `1.21.11` 改为 `1.21.1`，也不会将 `26.2` 补成其它旧式格式。若精确 Maven 构件版本与默认 `<minecraft>-R0.1-SNAPSHOT` 不同，显式传入 `--artifact-version`；映射依据必须写入证据记录。
 
 同步顺序是：项目 `state/` 已有资料、显式 `--gradle-user-home`、`state/environment.json` 的 `gradleUserHomes`、注册表 Maven 仓库。只有不存在 `environment.json` 时，才回退到 `GRADLE_USER_HOME` 与默认 Gradle 用户目录；配置文件存在但路径为空/无效时会停止，绝不隐式搜索默认 C 盘目录。每个归档都会记录来源、`SHA-256` 与解包文件数。
 
@@ -38,6 +39,33 @@ python agent-dev/tools/pluginbase_evidence.py compare --from <旧版本> --to <�
 PluginBase 资料默认从 Maven Central 的 `top.mrxiaom.pluginbase` 坐标下载。Central 的 Javadoc 为控制每月发布大小而只保留 HTML；工具直接查询源码和 HTML，不依赖被排除的 JavaScript、CSS、字体或搜索索引。
 
 若 Central 无法取得**完整的 sources 与 Javadoc 资料集**，工具才会整体回退到 JitPack。JitPack 对全部模块统一使用精确 group `top.mrxiaom.PluginBase`；其中 `PluginBase` 的大小写不可改变。
+
+## `dependency_index.py`
+
+用于从**目标项目自己的 Gradle Wrapper**取得真实的多模块解析结果，并在 `state/indexes/` 建立依赖、JAR 类名和公开 Java API 签名索引。它不解析 `build.gradle.kts` 文本来猜测依赖，也不会修改目标构建文件；临时 Gradle init script 在命令结束后删除。
+
+```text
+python agent-dev/tools/dependency_index.py sync --project .
+python agent-dev/tools/dependency_index.py status --project .
+python agent-dev/tools/dependency_index.py modules --project .
+python agent-dev/tools/dependency_index.py dependencies --project . --module :
+python agent-dev/tools/dependency_index.py classes --project . <类名或包关键词>
+python agent-dev/tools/dependency_index.py members --project . <类型、方法、字段或签名关键词>
+python agent-dev/tools/dependency_index.py members --project . addItem --type PlayerInventory
+python agent-dev/tools/dependency_index.py show --project . --artifact <GAV或哈希前缀>
+```
+
+`sync` 对每个可解析 Gradle 配置记录解析后的构件、项目/传递依赖边和失败项；扫描实际 JAR 类路径，并按项目锁定 GAV 从已配置 Gradle 缓存或公开 Maven 仓库取得同版本 `sources.jar`、`javadoc.jar`，索引公开 Java 类型、构造器、方法和字段。`--no-api` 可只同步依赖与类名；没有 Java sources、只有 Javadoc 或语言/文档结构无法可靠解析时，状态会明确标记为不完整，不能视为完整 API 证明。
+
+查询默认最多输出 `8` 条，格式紧凑；`dependencies` 默认只列已解析构件，传递依赖边需显式加 `--transitive`。`classes` 和未限定的 `members` 都是模糊搜索；已知调用者类型时使用 `members <成员> --type <类型>`，它会沿已索引 `extends`/`implements` 链定位成员声明，并标注继承距离。使用 `--limit`、`--offset` 分页，使用 `--verbose` 查看路径、哈希与来源，使用 `--json` 供自动化工具调用。索引过期、缺失或解析失败时，查询不会静默重同步；先执行 `sync`，再根据 `sources`/Javadoc 命中复核版本敏感调用的签名、弃用、线程与语义。
+
+该工具同样遵守 `state/environment.json`：未传 `--gradle-user-home` 时，环境文件存在就只使用其中的 `gradleUserHomes`，不会扫描默认 C 盘缓存。
+
+### Zoo Code 工具
+
+从项目 `.roo/skills/minecraft-pluginbase-development/` 运行初始化脚本时，安装器会自动创建 `./.roo/tools/pluginbase-dependency-index.ts`。同名已有工具始终保留，不会被自动覆盖。随后在 Zoo Code 的 Experimental 设置启用 Custom Tools，并按官方提示执行 `Refresh Custom Tools` 或重载窗口。
+
+Zoo Custom Tools 启用后会**自动批准**执行，因此只应启用已审查的项目工具。适配器只接受固定查询参数，以数组方式调用本 CLI，不提供任意 Shell 命令入口；它只返回紧凑字符串 JSON。`install-zoo` 子命令仅保留给非 `.roo/skills/` 安装路径的维护或修复场景。
 
 ## 通用外部依赖资料
 

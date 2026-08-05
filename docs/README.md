@@ -56,6 +56,7 @@
 | `evidence/evidence-policy.md` | 哪些结论必须取证、可接受来源、精确版本和停止条件。 |
 | `evidence/evidence-record-format.md` | 记录接口或框架结论的标准模板。 |
 | `evidence/query-playbook.md` | 资料同步、缓存、人工查询与当前工具命令协议。 |
+| `evidence/dependency-index.md` | 按 Gradle 模块建立依赖、类、公开 API 与继承关系索引，并可选接入 Zoo Code。 |
 
 ## 质量与维护
 
@@ -82,6 +83,7 @@
 | 增加 Paper-only 功能 | `server-api/api-selection.md`、`server-api/paper-extension-rules.md`、`evidence/evidence-policy.md` |
 | 增加配置、数据库或动态库 | `pluginbase/configuration-database-and-libraries.md`、`quality/review-checklist.md` |
 | 修改构建、发布和依赖 | `03-template-contract.md`、`pluginbase/packaging-and-relocation.md`、`quality/build-and-artifact-checklist.md` |
+| 陌生 Gradle 依赖、类或成员 | `evidence/dependency-index.md`、`evidence/query-playbook.md`；已知接收者类型时沿继承关系查询成员。 |
 | 用户给出陌生、前沿或非传统 Minecraft 版本号 | `server-api/minecraft-version-integrity.md`；保留原样版本并按 Wiki URL 核验，绝不自动改写。 |
 | 升级服务端/API/PluginBase | `server-api/version-compatibility.md`、`maintenance/update-policy.md`、`evidence/query-playbook.md` |
 | 想使用 NMS 或反射 | `server-api/nms-boundary.md`；未获明确许可时停止。 |

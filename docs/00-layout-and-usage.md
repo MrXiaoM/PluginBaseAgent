@@ -51,7 +51,7 @@
 agent-dev/state/
 ```
 
-6. 首次安装后填写 `agent-dev/state/environment.json` 的 `gradleUserHomes`，使任何 Agent 在上下文恢复后都能从项目内读取实际 Gradle 缓存目录；该本地文件必须保持忽略。
+6. 初始化脚本会调用目标项目 Gradle Wrapper，自动将实际 `gradleUserHomeDir` 写入 `agent-dev/state/environment.json`，使任何 Agent 在上下文恢复后都能从项目内读取实际 Gradle 缓存目录；该本地文件必须保持忽略。
 7. 若团队希望保留某次 API 取证结论，应将简短证据记录复制到项目正式文档或提交记录中；不要提交整个第三方源码/Javadoc 缓存。
 
 ## 日常使用入口

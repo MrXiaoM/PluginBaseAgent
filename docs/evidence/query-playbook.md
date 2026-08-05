@@ -16,7 +16,7 @@ agent-dev/
       spigot/<版本>/
       paper/<版本>/
       pluginbase-<模块>/<版本>/
-    indexes/                        # 为未来扩展保留的全文索引目录；忽略
+    indexes/                        # 依赖、类名和公开 API 索引；忽略
     records/                        # 本地查询记录；忽略
 ```
 
@@ -59,9 +59,14 @@ python agent-dev/tools/api_evidence.py compare --api spigot --from <版本> --to
 python agent-dev/tools/pluginbase_evidence.py sync --version <版本> --module <模块>
 python agent-dev/tools/pluginbase_evidence.py query --version <版本> --module <模块> --symbol <完整类名或成员>
 python agent-dev/tools/verify_plugin_project.py --project .
+python agent-dev/tools/dependency_index.py sync --project .
+python agent-dev/tools/dependency_index.py classes --project . <类名或包关键词>
+python agent-dev/tools/dependency_index.py members --project . <类型、方法、字段或签名关键词>
 ```
 
 工具输出精确坐标、来源、哈希、命中文件相对路径、行号或 Javadoc 上下文。`api_evidence.py` 将 `--minecraft` 作为用户原样版本文本写入清单，拒绝混用不同原样版本的缓存；具体规则见 `../server-api/minecraft-version-integrity.md`。
+
+依赖索引的默认结果最多 `8` 条，只用于先定位模块、GAV、类和公开签名；使用 `--verbose` 查看本机归档/哈希，使用 `--limit`、`--offset` 继续查询。已知接收者类型时，优先使用 `members <成员> --type <类型>`，它沿 `extends`/`implements` 关系报告成员实际声明处；API 资料也可使用 `api_evidence.py query --type <类型> --member <成员>`。索引发现构建输入变化时会停止而不会自动解析 Gradle；先显式执行 `sync`。完整协议见 `dependency-index.md`。
 
 ## 查询策略
 

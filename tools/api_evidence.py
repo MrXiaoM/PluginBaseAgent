@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import re
 import sys
 from pathlib import Path
 
@@ -48,8 +49,10 @@ def parser() -> argparse.ArgumentParser:
     query_parser.add_argument("--api", choices=("spigot", "paper"), required=True)
     query_parser.add_argument("--minecraft", required=True, help="同步时使用的原样 Minecraft 版本文本")
     query_parser.add_argument("--artifact-version", help="精确 Maven 构件版本；默认 <minecraft>-R0.1-SNAPSHOT")
-    query_parser.add_argument("--symbol", required=True, help="完整类名、简单类名或成员名")
-    query_parser.add_argument("--limit", type=int, default=80, help="最大命中数")
+    query_parser.add_argument("--symbol", help="全文搜索的完整类名、简单类名或成员名")
+    query_parser.add_argument("--type", dest="type_name", help="类型限定搜索：完整/简单类型名，可沿继承关系查成员")
+    query_parser.add_argument("--member", help="与 --type 配合的成员名或片段")
+    query_parser.add_argument("--limit", type=int, default=8, help="最大命中数，默认 8")
     query_parser.add_argument("--state", type=Path, default=STATE_ROOT, help="本地状态目录")
 
     compare_parser = subcommands.add_parser("compare", help="比较两个已同步版本中的符号文本")
@@ -108,10 +111,98 @@ def command_query(arguments: argparse.Namespace) -> int:
             "工具不会将两个版本视为同一版本。"
         )
     root = artifact_root(arguments.state, arguments.api, version)
+    if arguments.type_name or arguments.member:
+        if not arguments.type_name or not arguments.member:
+            raise EvidenceError("类型限定查询必须同时传入 --type 与 --member。")
+        return query_member_with_inheritance(root / "sources", arguments.type_name, arguments.member, arguments.limit)
+    if not arguments.symbol:
+        raise EvidenceError("查询必须传入 --symbol，或同时传入 --type 与 --member。")
     print(f"证据：用户 Minecraft 版本 `{original}`；构件 `{version}`")
     source_code = print_matches(root / "sources", arguments.symbol, arguments.limit)
     javadoc_code = print_matches(root / "javadoc", arguments.symbol, arguments.limit)
     return 0 if source_code == 0 or javadoc_code == 0 else 1
+
+
+def java_types(source_root: Path) -> tuple[dict[str, dict[str, object]], dict[str, set[str]]]:
+    """取得可公开检索的 Java 类型及其直接父类/接口关系。"""
+    types: dict[str, dict[str, object]] = {}
+    simple_names: dict[str, set[str]] = {}
+    pattern = re.compile(
+        r"\b(?:public\s+)?(?:abstract\s+|final\s+)?(?:class|interface|enum|record)\s+"
+        r"(\w+)(?:\s+extends\s+([^\{]+?))?(?:\s+implements\s+([^\{]+?))?\s*\{"
+    )
+    for source in sorted(source_root.rglob("*.java")):
+        try:
+            lines = source.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        package = ""
+        imports: dict[str, str] = {}
+        for line in lines[:200]:
+            package_match = re.match(r"\s*package\s+([\w.]+)\s*;", line)
+            if package_match:
+                package = package_match.group(1)
+            import_match = re.match(r"\s*import\s+([\w.]+)\s*;", line)
+            if import_match and not import_match.group(1).endswith(".*"):
+                imported = import_match.group(1)
+                imports[imported.rsplit(".", 1)[-1]] = imported
+        for line_number, line in enumerate(lines, start=1):
+            match = pattern.search(line)
+            if not match:
+                continue
+            simple = match.group(1)
+            qualified = f"{package}.{simple}" if package else simple
+            parents: list[str] = []
+            for clause in (match.group(2), match.group(3)):
+                if not clause:
+                    continue
+                for parent in clause.split(","):
+                    name = re.sub(r"<.*?>", "", parent).strip().split()[0]
+                    if not name:
+                        continue
+                    parents.append(name if "." in name else imports.get(name, f"{package}.{name}" if package else name))
+            types[qualified] = {"path": source.relative_to(source_root).as_posix(), "line": line_number, "parents": parents}
+            simple_names.setdefault(simple, set()).add(qualified)
+    return types, simple_names
+
+
+def query_member_with_inheritance(source_root: Path, type_name: str, member: str, limit: int) -> int:
+    types, simple_names = java_types(source_root)
+    seeds = {type_name} if "." in type_name else simple_names.get(type_name, set())
+    if not seeds:
+        print(f"未找到类型：{type_name}")
+        return 1
+    visible: dict[str, int] = {}
+    pending = [(item, 0) for item in seeds]
+    while pending:
+        current, distance = pending.pop(0)
+        if current in visible and visible[current] <= distance:
+            continue
+        visible[current] = distance
+        pending.extend((parent, distance + 1) for parent in types.get(current, {}).get("parents", []))
+    hits: list[tuple[int, str, str, int, str]] = []
+    member_pattern = re.compile(rf"\b{re.escape(member)}\s*\(", re.IGNORECASE)
+    for owner, distance in visible.items():
+        data = types.get(owner)
+        if not data:
+            continue
+        path = source_root / str(data["path"])
+        try:
+            lines = path.read_text(encoding="utf-8", errors="replace").splitlines()
+        except OSError:
+            continue
+        for line_number, line in enumerate(lines, start=1):
+            if member_pattern.search(line):
+                hits.append((distance, owner, str(data["path"]), line_number, " ".join(line.split())))
+    hits.sort()
+    shown = hits[:max(1, limit)]
+    print(f"{type_name} 可见成员 `{member}`：{len(hits)}")
+    for distance, owner, path, line_number, declaration in shown:
+        inherited = "" if distance == 0 else f" | 继承 {distance}"
+        print(f"声明于 {owner}{inherited} | {declaration} | {path}:{line_number}")
+    if len(hits) > len(shown):
+        print(f"其余 {len(hits) - len(shown)} 条；使用更精确成员名或提高 --limit")
+    return 0 if hits else 1
 
 
 def command_compare(arguments: argparse.Namespace) -> int:

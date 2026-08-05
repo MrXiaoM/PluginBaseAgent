@@ -41,7 +41,7 @@
 | `docs/evidence/` | API 资料查询与证据记录要求 | 使用版本敏感接口前 |
 | `docs/quality/` | 代码风格、评审清单、构建与产物检查 | 提交改动前 |
 | `docs/maintenance/` | 文档、工具、资料与依赖升级规则 | 升级版本或维护资料时 |
-| `tools/README.md` | API/PluginBase 资料同步、查询、比较与项目静态验证命令 | 使用版本敏感接口或提交构建改动前 |
+| `tools/README.md` | Gradle 依赖索引、API/PluginBase 资料同步、查询、比较与项目静态验证命令 | 使用陌生依赖、版本敏感接口或提交构建改动前 |
 | `registry/` | Spigot/Paper、PluginBase 与已登记外部依赖的构件坐标、仓库和资料策略 | 排查资料下载或更新来源规则时 |
 
 ## 推荐阅读顺序
@@ -51,8 +51,9 @@
 3. 阅读 `docs/00-layout-and-usage.md`，确认当前项目中资料包的位置和可写目录。
 4. 阅读 `docs/01-agent-contract.md`，确认目标 Minecraft 版本、服务器 API 与兼容边界。
 5. 根据任务读取 `docs/02-development-workflow.md` 和对应专题文档。
-6. 使用 `tools/api_evidence.py` 或 `tools/pluginbase_evidence.py` 同步并查询目标版本资料，再实现版本敏感代码。
-7. 修改完成后按 `docs/quality/build-and-artifact-checklist.md` 执行构建与产物检查。
+6. 遇到陌生 Gradle 依赖时，先用 `tools/dependency_index.py status/sync` 建立并查询真实模块依赖、类、公开签名和继承关系；索引只负责定位，不替代 sources/Javadoc 复核。
+7. 使用 `tools/api_evidence.py` 或 `tools/pluginbase_evidence.py` 同步并查询目标版本资料，再实现版本敏感代码。
+8. 修改完成后按 `docs/quality/build-and-artifact-checklist.md` 执行构建与产物检查。
 
 ## 适用范围
 
@@ -87,4 +88,4 @@
 | Codex | `<插件项目>/.agents/skills/minecraft-pluginbase-development/` |
 | OpenCode | `<插件项目>/.opencode/skills/minecraft-pluginbase-development/` |
 
-安装后，在相应目录下运行 `scripts/install_kit.py --project <插件项目>`，将资料释放到统一的 `<插件项目>/agent-dev/`。不同工具的 Skill 安装位置不同，但 `agent-dev/` 的布局、工具命令和开发规则完全一致。
+安装后，在相应目录下运行一次 `scripts/install_kit.py --project <插件项目>`，将资料释放到统一的 `<插件项目>/agent-dev/`，由目标项目 Gradle Wrapper 写入实际 Gradle 缓存配置，并同步首次依赖索引。不同工具的 Skill 安装位置不同，但 `agent-dev/` 的布局、工具命令和开发规则完全一致。

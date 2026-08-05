@@ -6,7 +6,7 @@
 
 `state/environment.json` 是本项目开发环境的持久本地配置。它专门保存上下文压缩、重新连接或更换 Agent 后仍必须保留的机器相关信息；它和下载缓存一样只留在本机，不得提交、分发或打进插件 JAR。
 
-首次通过 Skill 安装资料包后会自动创建如下模板。必须将 `gradleUserHomes` 填为实际 Gradle 用户目录；Windows 路径推荐使用正斜杠：
+首次通过 Skill 安装资料包时，安装器会调用目标项目自己的 Gradle Wrapper，读取 Gradle 实际报告的 `gradleUserHomeDir` 并自动写入如下配置；Windows 路径使用正斜杠。已有有效配置会保留。只有 Wrapper 无法启动时才使用 `--gradle-user-home` 作为显式诊断覆盖：
 
 ```json
 {
@@ -30,7 +30,7 @@ state/
   environment.json # 机器本地环境配置；首次安装创建，不分发、不提交
   downloads/       # 下载或从 Gradle 缓存复用的原始 sources/Javadoc 归档
   evidence/        # 安全解包后的源码与 Javadoc
-  indexes/         # 可重建的全文/符号索引
+  indexes/         # 可重建的依赖、类名、公开 API 与继承关系索引
   records/         # 本地查询输出和临时证据记录
 ```
 
@@ -40,7 +40,8 @@ state/
 - 不保存服务端世界、生产数据库、密码、令牌或私有仓库凭据；
 - 不把任何内容打进插件 JAR；
 - 不提交 `state/` 的下载归档、解包资料、索引或临时记录；
-- 需要长期保留的结论，应转写成精简 Markdown 证据记录，包含坐标、版本、哈希和必要签名，而不是提交整份第三方归档。
+- 需要长期保留的结论，应转写成精简 Markdown 证据记录，包含坐标、版本、哈希和必要签名，而不是提交整份第三方归档；
+- `indexes/dependency-index.json` 与其构件 sources/Javadoc 缓存可随 Gradle 构建输入、Wrapper、锁文件或归档哈希变化重建，不应提交。
 
 项目根 `.gitignore` 应包含：
 
