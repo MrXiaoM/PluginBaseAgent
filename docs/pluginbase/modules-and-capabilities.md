@@ -17,9 +17,9 @@ PluginBase 按模块拆分能力。项目应只引入确实使用的模块，并
 | `library` | `BukkitPlugin`、基础接口、通用数据结构、默认 Bukkit 实现、基础工具 | 通常为必需基线。 |
 | `misc` | Folia/Bukkit 调度选择、Bungee 通道、配置更新等扩展 | 通常与 `library` 一同使用；所需能力按符号验证。 |
 | `paper` | 在同一插件 JAR 中优先使用 Paper 物品/库存实现、不可用时回退 Bukkit 实现 | 用于同时兼容 Spigot 与 Paper；主类覆写两项工厂方法，见 `lifecycle-and-main-class.md`。 |
-| `actions` | Action 接口、动作提供器和内建动作 | 配置解释为动作时使用；注册自定义动作前核对提供器 API。 |
-| `gui` | GUI 管理、Holder、模型、图标、页面等 | 使用框架 GUI 时加入；同时确认物品/库存工厂策略。 |
-| `l10n` | 语言管理、语言 Holder、消息对象与处理器 | 需要可重载本地化消息时加入；明确消息资源与加载时机。 |
+| `actions` | Action 接口、动作提供器和内建动作 | 配置解释为动作时使用；注册自定义动作前核对提供器 API。它不替代菜单权限、事务或点击锁。 |
+| `gui` | 箱子容器菜单管理、Holder、模型、图标、页面等 | 使用框架 `Inventory` 菜单时加入；计划阶段必须查询当前版本 `IGuiHolder`、`GuiManager`、`AbstractGuiModule`/`AbstractGuisModule` 与 `LoadedIcon`，同时确认物品/库存工厂策略。 |
+| `l10n` | 语言管理、语言 Holder、消息对象与处理器 | 需要可重载本地化消息时加入；明确消息资源与加载时机。它不管理菜单 slot 或菜单会话状态。 |
 | `commands` | 命令参数、命令注入等工具 | 需要其公共能力时加入；普通 Bukkit 命令不因存在该模块而强制迁移。 |
 | `temporary-data` | 临时数据相关能力 | 仅在目标版本资料验证后按需要加入。 |
 | `magic` | Magic 领域能力 | 仅在确有需求且查证 API 后加入。 |
@@ -61,7 +61,8 @@ public @NotNull InventoryFactory initInventoryFactory() {
 | 编辑跨版本物品属性 | `library`、可选 `paper` | 通过 `ItemEditor`；具体属性仍取证。 |
 | 多语言消息 | `l10n` | 语言 Holder 注册时机与配置重载顺序。 |
 | 配置触发动作 | `actions` | 动作参数、目标选择和异步语义。 |
-| 菜单/界面 | `gui`、可选 `actions`、可选 `l10n` | Holder 生命周期、点击事件与关闭清理。 |
+| Java 硬编码箱子容器菜单 | `gui`、可选 `paper` | 每玩家 `IGuiHolder` 实例、顶层容器 Holder、点击/拖拽/关闭、异步回调和返回链；见 `../gui/hardcoded-inventory-menus.md`。 |
+| YAML 配置驱动箱子容器菜单 | `gui`、可选 `actions`、可选 `l10n`、可选 `paper` | 字符布局与图标是共享模型，玩家状态在运行期实例；重载时处理旧界面；见 `../gui/config-driven-inventory-menus.md`。 |
 | 重载命令 | `commands` 或普通 Bukkit 命令 | `plugin.yml`、权限和补全一致性。 |
 | 可选外部插件支持 | `library` 工具与项目 `depend/` 适配层 | API 保持 `compileOnly`，类加载隔离。 |
 | 数据库 | `library` 与项目依赖 | Options、配置、连接生命周期和线程边界。 |
@@ -70,9 +71,9 @@ public @NotNull InventoryFactory initInventoryFactory() {
 
 - `paper` 不等于项目可以编译或运行任意 Paper 专用业务代码；
 - `misc` 不等于每种线程或调度任务都自动安全；
-- `actions` 不等于任意 YAML 都能安全执行外部命令；
-- `gui` 不等于无需处理玩家下线、关闭和数据一致性；
-- `l10n` 不等于配置重载无需测试；
+- `actions` 不等于任意 YAML 都能安全执行外部命令，也不替代菜单业务前置校验；
+- `gui` 不等于无需处理玩家下线、关闭、拖拽、重复点击、重载和数据一致性；
+- `l10n` 不等于配置重载无需测试，也不替代菜单模型或 slot 路由；
 - `library` 不等于可以绕过目标 Spigot/Paper 版本资料。
 
 每项调用都必须查询目标 PluginBase 版本的签名、Javadoc 与依赖关系。

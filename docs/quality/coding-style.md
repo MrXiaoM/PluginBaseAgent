@@ -37,6 +37,12 @@
 - 使用插件/模块日志接口输出运行期信息；避免在高频路径日志刷屏。
 - 对用户可见错误提供可执行提示；对开发诊断保留足够上下文，但不泄露密码、连接字符串或敏感数据。
 
+## 物品图标与自定义数据
+
+- 创建或编辑硬编码 `ItemStack` 图标时，优先使用 `AdventureItemStack`；它通过 PluginBase 的 `ItemEditor` 统一处理 Adventure `Component`、MiniMessage 名称和 Lore。
+- 未使用 Adventure 的既有代码路径，以及发光、自定义模型数据、物品模型等辅助操作，使用 `ItemStackUtil` 的已验证方法。不要在各业务类散落重复的 `ItemMeta` 获取、修改、写回代码。
+- `AdventureItemStack`、`ItemStackUtil` 的具体重载与版本能力必须在项目锁定的 PluginBase 资料中查询，不能按记忆假定签名。
+
 ## 物品自定义数据
 
 - 当构建脚本已引入 `item-nbt-api` 时，物品自定义数据必须通过该依赖读写；不得为同一用途使用 `PersistentDataContainer`、`PersistentDataType` 或 `ItemMeta#getPersistentDataContainer()`。

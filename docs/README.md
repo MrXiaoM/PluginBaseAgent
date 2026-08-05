@@ -11,6 +11,13 @@
 | `02-development-workflow.md` | 从需求、证据、设计到构建和交付的完整执行顺序。 |
 | `03-template-contract.md` | `template-site` 生成项目的构建、模块、依赖、资源和 Shadow 基线。 |
 
+## 箱子容器菜单
+
+| 文件 | 解决的问题 |
+| --- | --- |
+| `gui/hardcoded-inventory-menus.md` | Java 硬编码的 `Inventory` 箱子容器菜单：每玩家 Holder、slot、点击、拖拽、关闭、异步与返回链。 |
+| `gui/config-driven-inventory-menus.md` | YAML 配置驱动的箱子容器菜单：字符布局、图标模型、重载、多菜单，以及 `gui`/`actions`/`l10n` 的组合边界。 |
+
 ## PluginBase
 
 | 文件 | 解决的问题 |
@@ -59,6 +66,8 @@
 | --- | --- |
 | 新建模板项目 | `03-template-contract.md`、`pluginbase/packaging-and-relocation.md` |
 | 新增命令/监听器 | `01-agent-contract.md`、`server-api/spigot-first-rules.md`、`pluginbase/auto-register-and-holders.md` |
+| 新增 Java 硬编码箱子容器菜单 | `gui/hardcoded-inventory-menus.md`、`pluginbase/modules-and-capabilities.md`、`evidence/query-playbook.md` |
+| 新增 YAML 配置驱动箱子容器菜单 | `gui/config-driven-inventory-menus.md`、`pluginbase/modules-and-capabilities.md`、`pluginbase/configuration-database-and-libraries.md` |
 | 新增 GUI/物品功能且需 Spigot/Paper 双端支持 | `pluginbase/modules-and-capabilities.md`、`pluginbase/lifecycle-and-main-class.md`、`server-api/api-selection.md` |
 | 增加 Paper-only 功能 | `server-api/api-selection.md`、`server-api/paper-extension-rules.md`、`evidence/evidence-policy.md` |
 | 增加配置、数据库或动态库 | `pluginbase/configuration-database-and-libraries.md`、`quality/review-checklist.md` |

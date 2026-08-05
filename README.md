@@ -34,6 +34,7 @@
 | `docs/01-agent-contract.md` | Agent 的强制规则：先取证、禁止猜测、停止条件 | 每个任务开始前 |
 | `docs/02-development-workflow.md` | 从需求到构建验证的完整流程 | 开发、修复和评审时 |
 | `docs/03-template-contract.md` | `template-site` 生成项目的结构与构建约定 | 新建项目或改构建脚本时 |
+| `docs/gui/` | 硬编码与配置驱动的 Minecraft 箱子容器菜单、图标、交互与重载边界 | 设计或修改 `Inventory` 菜单时 |
 | `docs/pluginbase/` | `PluginBase` 主类、生命周期、模块、配置与打包规范 | 使用或修改 `PluginBase` 相关代码时 |
 | `docs/server-api/` | Spigot 优先、Paper 扩展、版本兼容与 NMS 边界 | 使用服务端 API 前 |
 | `docs/evidence/` | API 资料查询与证据记录要求 | 使用版本敏感接口前 |

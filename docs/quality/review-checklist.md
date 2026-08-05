@@ -28,6 +28,7 @@
 - [ ] `requirePlugins`、`priority` 与 `plugin.yml` 依赖声明一致。
 - [ ] `paper` 模块若被引入，原因是 Spigot/Paper 双端物品/库存兼容或已验证的对应框架能力。
 - [ ] 主类按需覆写 `initItemEditor()`、`initInventoryFactory()` 并调用 `PaperFactory`。
+- [ ] 箱子容器菜单已按项目统一版本查询 `gui` 模块；若使用配置动作或语言，已按实际启用模块查询 `actions`、`l10n`，且没有把框架源码当作完整业务菜单示例。
 - [ ] 调度、重载、数据库和停用路径符合框架生命周期。
 
 ## 业务结构与状态
@@ -36,7 +37,12 @@
 - [ ] 可选插件 API 被隔离，缺失时核心功能不会类加载失败。
 - [ ] 配置键、默认值、类型、错误和迁移行为完整。
 - [ ] Bukkit 枚举或注册表类型没有使用 `Enum.valueOf(...)`/`Material.valueOf(...)` 解析；已使用 `Util.valueOr(...)`、`Util.valueOrNull(...)` 或相应 `Util.parse*` 包装方法，并处理默认值/`null`。
+- [ ] 硬编码菜单和其它代码创建/编辑物品图标时优先使用 `AdventureItemStack`；不使用 Adventure 的既有路径或发光/模型等辅助操作使用 `ItemStackUtil` 的已验证方法，没有在业务代码重复散落裸 `ItemMeta` 读改写流程。
 - [ ] 构建脚本已安装 `item-nbt-api` 时，物品自定义数据没有使用 `PersistentDataContainer`、`PersistentDataType` 或 `ItemMeta#getPersistentDataContainer()`；同一物品数据只通过 `item-nbt-api` 读写。
+- [ ] 箱子容器菜单为每位玩家创建独立 Holder/会话实例；共享配置模型不保存玩家、分页、点击锁或异步状态。
+- [ ] 菜单顶部库存的 Holder、有效 slot、点击、拖拽、玩家背包和输入槽的允许/取消策略明确且已走查。
+- [ ] 菜单关闭、玩家退出、重载、停用和父子菜单跳转不会遗留旧实例、临时物品、任务或可执行的异步回调。
+- [ ] 配置菜单中的 Action 已注册并在 Java 业务校验后执行；L10n 仅管理用户文本，不绕过权限、事务或 slot 路由。
 - [ ] 玩家/实体/世界/库存对象在延迟或异步操作前重新验证。
 - [ ] 任务、监听器、连接、文件和缓存有明确清理责任。
 - [ ] 重载不会保留旧任务、旧监听器、旧配置或已关闭资源的引用。

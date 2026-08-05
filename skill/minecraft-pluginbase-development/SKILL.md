@@ -30,13 +30,18 @@ description: Guides development, maintenance, review, and version upgrades of Gr
    - `python agent-dev/tools/pluginbase_evidence.py sync/query ...`
 5. 无法取得资料或查询不到符号时，停止猜测，报告已尝试来源与阻塞项；不得编造 API、反射字符串或近似版本。
 6. 使用 PluginBase 时：继承 `BukkitPlugin`，不覆写 `onLoad()`、`onEnable()`、`onDisable()`；将框架打入 Shadow JAR 并重定位；保持 `scanIgnore` 与 `shadowGroup` 一致；保留 `META-INF/PluginBaseHolders` 合并。
-7. 解析 Bukkit 枚举或注册表类型时使用 `Util.valueOr(...)`、`Util.valueOrNull(...)` 或对应 `Util.parse*` 方法；不要使用 `Enum.valueOf(...)` 或 `Material.valueOf(...)`。
-8. 构建脚本已安装 `item-nbt-api` 时，物品自定义数据必须用该依赖读写；不得对 `ItemStack`/`ItemMeta` 使用 `PersistentDataContainer`、`PersistentDataType` 或 `getPersistentDataContainer()` 作为替代方案。
-9. 修改后执行 `python agent-dev/tools/verify_plugin_project.py --project .`、项目 Gradle Wrapper 构建，并按 `agent-dev/docs/quality/build-and-artifact-checklist.md` 审查最终 JAR。
+7. 计划或修改箱子容器菜单时，先按统一版本同步并查询 `gui` 模块；不能把其源码当作完整业务菜单示例。按实现方式阅读 `agent-dev/docs/gui/hardcoded-inventory-menus.md` 或 `agent-dev/docs/gui/config-driven-inventory-menus.md`；配置点击动作或语言时只在模块已启用的前提下继续查询 `actions`、`l10n`。
+8. 箱子容器菜单必须以每玩家独立 `IGuiHolder`/会话实例管理可变状态，明确顶部 Holder、slot、点击、拖拽、关闭、玩家退出、重载、点击锁与异步回调失效。YAML 模型、Action 和 L10n 不得绕过 Java 业务权限、事务或数据校验。
+9. 创建或编辑硬编码物品图标时，优先使用 `AdventureItemStack`；对非 Adventure 既有路径及发光/模型等辅助操作使用 `ItemStackUtil` 的已验证方法。不得在业务菜单中重复散落裸 `ItemMeta` 读改写流程。
+10. 解析 Bukkit 枚举或注册表类型时使用 `Util.valueOr(...)`、`Util.valueOrNull(...)` 或对应 `Util.parse*` 方法；不要使用 `Enum.valueOf(...)` 或 `Material.valueOf(...)`。
+11. 构建脚本已安装 `item-nbt-api` 时，物品自定义数据必须用该依赖读写；不得对 `ItemStack`/`ItemMeta` 使用 `PersistentDataContainer`、`PersistentDataType` 或 `getPersistentDataContainer()` 作为替代方案。
+12. 修改后执行 `python agent-dev/tools/verify_plugin_project.py --project .`、项目 Gradle Wrapper 构建，并按 `agent-dev/docs/quality/build-and-artifact-checklist.md` 审查最终 JAR。
 
 ## 文档导航
 
 - 布局和复制边界：`agent-dev/docs/00-layout-and-usage.md`
+- 硬编码箱子容器菜单：`agent-dev/docs/gui/hardcoded-inventory-menus.md`
+- 配置驱动箱子容器菜单：`agent-dev/docs/gui/config-driven-inventory-menus.md`
 - 开发总流程：`agent-dev/docs/02-development-workflow.md`
 - 模板和构建：`agent-dev/docs/03-template-contract.md`
 - PluginBase：`agent-dev/docs/pluginbase/overview.md`
