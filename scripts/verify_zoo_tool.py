@@ -73,6 +73,8 @@ def main() -> int:
         raise RuntimeError("Zoo 工具查询操作不符合受限集合")
     if 'verbose: z.boolean()' not in template_text or 'if (verbose) args.push("--verbose")' not in template_text:
         raise RuntimeError("Zoo 工具未将 show 的详细构件路径请求转发给索引 CLI")
+    if 'if (action === "members" && verbose) args.push("--verbose")' not in template_text:
+        raise RuntimeError("Zoo 工具未将 members 的 Javadoc 摘要与页面路径请求转发给索引 CLI")
     if '"status"' in template_text or "先用 CLI sync" in template_text:
         raise RuntimeError("Zoo 工具不应提供 status 或引导日常 CLI 同步")
     with tempfile.TemporaryDirectory(prefix="pluginbase-agent-zoo-tool-") as temporary:
@@ -113,7 +115,7 @@ def main() -> int:
             raise RuntimeError(f"CLI --force 未覆盖 Zoo JS 工具：{forced.stderr or forced.stdout}")
 
         generated_package = (tool.parent / "package.json").exists()
-    print(f"通过：Zoo JS 工具可经 Node 动态加载，受限查询包含 show 的详细归档路径转发且不含 status 或日常 CLI sync 引导；两个安装入口均安装 zod@{ZOD_VERSION}，未生成锁文件，npm 生成 package.json：{generated_package}。")
+    print(f"通过：Zoo JS 工具可经 Node 动态加载，受限查询包含 show 的详细归档路径以及 members 的 Javadoc 摘要、页面路径转发，且不含 status 或日常 CLI sync 引导；两个安装入口均安装 zod@{ZOD_VERSION}，未生成锁文件，npm 生成 package.json：{generated_package}。")
     return 0
 
 

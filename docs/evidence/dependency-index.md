@@ -22,9 +22,9 @@ python agent-dev/tools/dependency_index.py sync --project .
 - 实际运行 JAR 的二进制 `.class` 中可解析的公开类型、字段、构造器、方法描述符与直接继承关系；这也是所有索引签名与所属类型的唯一权威来源；
 - 由 sources/Javadoc 唯一确认的源码位置、类型/成员摘要，最多 `420` 字符；它们只补全资料，不会新增、删除或改写字节码签名。
 
-同步使用 Python 标准库 `sqlite3` 批量写入，类与成员使用 SQLite `FTS5` 按需检索；查询只读取匹配的受限结果，不会将整份索引 JSON 载入内存。类名和公开 API 均以每批 `2,000` 条写入基础表；类名会输出当前构件的 `类名 N/M` 进度，公开 API 每处理 `200` 个运行 class 文件刷新 `字节码结构 N/M`。全部构件落盘后才在 `4/4` 阶段一次性从基础表重建两份全文索引，避免每个 `.class` 或公开签名都同步维护一次 FTS。二进制 JAR 与资料归档的 `SHA-256` 会按路径、大小和修改时间复用，避免重复顺序读取。
+同步按构件依次执行清晰阶段：扫描类名、读取运行字节码、读取源码、读取说明页面、连接资料与写入完整公开成员记录。Gradle 返回全部唯一构件的位置和资料路径后，默认使用不超过 `8` 个工作线程并行读取、解压和分析不同构件；工作线程只产生纯内存结果，绝不访问 SQLite。主线程通过有界结果队列逐个接收完成构件，并独占 SQLite 连接、事务和构件写入。可用 `sync --workers N` 在 `1` 到 `8` 间覆盖线程数；结果按完成顺序写入，索引内容不依赖写入顺序。类名和公开 API 均以每批 `2,000` 条写入基础表；运行字节码每处理 `200` 个 `.class` 刷新一次 `字节码结构 N/M`，并行阶段显示工作线程数和 `已写入构件 N/M`。资料关联在首次写入 `api` 前完成，源码位置、说明页面和短摘要随同一条公开成员记录一次写入，不会执行第二次成员更新。全部构件的基础数据写完后，才在 `4/4` 阶段一次性创建普通查询索引、重建两份全文索引；因此方法签名仍可查询到对应的 Javadoc 路径和摘要，同时避免每个 `.class` 或公开签名插入时维护索引。二进制 JAR 与资料归档的 `SHA-256` 会按路径、大小和修改时间复用，避免重复顺序读取。
 
-默认同步公开 API。目标项目自己的 Gradle Wrapper 会使用项目已声明的仓库、镜像、认证、缓存与网络策略解析 `sources.jar`、`javadoc.jar`；索引器不扫描缓存猜测文件，也不会自行联网下载。第一阶段会实时转发 Gradle 输出，并在首次解析每个资料变体时显示 `解析资料构件 N：<GAV>:sources|javadoc`；索引 JSON 标记区保持静默，不会刷出大段机器数据。Python 只流式读取 Gradle 返回的本机归档，不复制归档、不解包 HTML/JS/CSS/图片，也不会把完整 Javadoc 保存到 `state/`。即使 sources 存在，所有类结构和签名仍从最终运行 JAR 读取，因此可正确处理不规范构件、Shadow 合并和重定位。资料补全先按完整类型名关联；找不到时仅在 sources 中存在唯一同简单类名候选时尝试重定位关联。成员还必须同时满足成员种类、名称、参数数量、数组维度、基本类型和可稳定比较的引用类型结构；有重载、多个候选或任何歧义时不附加文档，绝不猜测。若只需先查看依赖/类名，可使用 `--no-api`；该模式会要求 Gradle 跳过资料变体解析，此时成员查询不会有完整结果。
+默认同步公开 API。目标项目自己的 Gradle Wrapper 会使用项目已声明的仓库、镜像、认证、缓存与网络策略解析 `sources.jar`、`javadoc.jar`；索引器不扫描缓存猜测文件，也不会自行联网下载。第一阶段会实时转发 Gradle 输出，并在首次解析每个资料变体时显示 `解析资料构件 N：<GAV>:sources|javadoc`；索引 JSON 标记区保持静默，不会刷出大段机器数据。Python 只读取 Gradle 返回归档中有机会关联的单个条目，不复制归档、不解包 HTML/JS/CSS/图片，也不会把完整 Javadoc 保存到 `state/`。资料文件优先由完整运行类名直接定位；只有完整路径不存在时，才一次性建立源码简单文件名目录并且仅接受唯一候选，供重定位场景回退。每个命中的源码文件和说明页面在当前构件中最多读取、分析一次；说明页面顺序解析后按成员名保存候选，成员不会重复扫描完整页面。即使 sources 存在，所有类结构和签名仍从最终运行 JAR 读取，因此可正确处理不规范构件、Shadow 合并和重定位。资料补全仅在成员种类、名称、参数数量、数组维度、基本类型和可稳定比较的引用类型结构均唯一对应时写入；有重载、多个候选、解析失败或任何歧义时不附加资料，绝不猜测。若只需先查看依赖/类名，可使用 `--no-api`；该模式会要求 Gradle 跳过资料变体解析，此时成员查询不会有完整结果。
 
 ## 缓存与安全边界
 
@@ -36,7 +36,7 @@ SQLite 索引属于 `agent-dev/state/`，不提交、不分发、不参与插件
 
 ## 查询规则
 
-具体 Zoo 参数映射见 `dependency-index-zoo-tool.md`，无 Zoo 时的 CLI 示例见 `dependency-index-cli.md`。默认结果最多 `8` 条：类查询显示类名与 GAV；成员查询显示公开声明、所属类型、GAV 与 source 位置；依赖查询默认只显示实际构件。需要更多结果时使用通道对应的 `limit`/`--limit`、`offset`/`--offset`。需要来源、哈希和主 JAR、sources/Javadoc 本机路径时，对 `show` 使用 Zoo `verbose: true`，或 CLI `--verbose`。无索引、索引过期、解析失败或资料不足都会输出短错误，不输出堆栈；这些结果本身不授权同步。
+具体 Zoo 参数映射见 `dependency-index-zoo-tool.md`，无 Zoo 时的 CLI 示例见 `dependency-index-cli.md`。默认结果最多 `8` 条：类查询显示类名与 GAV；成员查询显示公开声明、所属类型、GAV 与 source 位置；依赖查询默认只显示实际构件。需要更多结果时使用通道对应的 `limit`/`--limit`、`offset`/`--offset`。成员查询使用 Zoo `verbose: true` 或 CLI `--verbose` 时，会像 IDE 悬停一样附加 SQLite 中唯一确认的 Javadoc 页面条目路径和短摘要；无资料或关联有歧义时不猜测。需要来源、哈希和主 JAR、sources/Javadoc 本机路径时，对 `show` 使用 Zoo `verbose: true`，或 CLI `--verbose`。无索引、索引过期、解析失败或资料不足都会输出短错误，不输出堆栈；这些结果本身不授权同步。
 
 `classes` 和未限定的 `members` 是不区分大小写的模糊搜索。已知接收者类型时，使用 `members <成员关键词> --type <完整或简单类型名>`；索引会沿已记录的 `extends`/`implements` 链搜索该类型可见成员，并明确输出“声明于 <父类型> | 继承 N”。例如 `PlayerInventory` 可见的 `addItem` 实际声明于 `Inventory`。关系来自 sources 类型声明或字节码直接父类/接口；遇到无法解析、未索引或歧义的父类型时不会猜测。
 
@@ -44,6 +44,6 @@ SQLite 索引属于 `agent-dev/state/`，不提交、不分发、不参与插件
 
 ## Zoo Code 适配器
 
-从项目 `.roo/skills/minecraft-pluginbase-development/` 运行初始化脚本时，安装器自动创建 `./.roo/tools/pluginbase-dependency-index.js`，并在同目录自动安装 Zoo 参数校验所需的 `zod@3.25.76`。Zoo 对 `.js` 工具直接加载，避免项目工具经 esbuild 打包时解析不到扩展内部 `@roo-code/types`；模板导出普通工具对象与真实 Zod schema，限定固定索引查询动作，不接受任意命令，返回受限大小的字符串 JSON。`show` 的 `verbose: true` 仅转发索引 CLI 的 `--verbose`，返回数据库已记录的主 JAR、sources/Javadoc 路径与哈希，不扫描缓存、不联网、不触发同步。已有同名 `.js` 工具始终保留，不自动覆盖。
+从项目 `.roo/skills/minecraft-pluginbase-development/` 运行初始化脚本时，安装器自动创建 `./.roo/tools/pluginbase-dependency-index.js`，并在同目录自动安装 Zoo 参数校验所需的 `zod@3.25.76`。Zoo 对 `.js` 工具直接加载，避免项目工具经 esbuild 打包时解析不到扩展内部 `@roo-code/types`；模板导出普通工具对象与真实 Zod schema，限定固定索引查询动作，不接受任意命令，返回受限大小的字符串 JSON。`show` 的 `verbose: true` 转发索引 CLI 的 `--verbose`，返回数据库已记录的主 JAR、sources/Javadoc 路径与哈希；`members` 的 `verbose: true` 同样转发该开关，返回已确认的成员 Javadoc 页面条目路径和短摘要。两者均不扫描缓存、不联网、不触发同步。已有同名 `.js` 工具始终保留，不自动覆盖。
 
 Zoo Code Custom Tools 是实验性功能，启用后自动批准工具执行。用户只需在 Zoo Code 的 Experimental 设置启用 Custom Tools，并在工具变更后执行 `Refresh Custom Tools` 或重载窗口。工具已加载的会话必须遵循 `dependency-index-zoo-tool.md`，不得改用 CLI 查询。核心 CLI 不依赖 Zoo；`install-zoo` 子命令仅用于非 `.roo/skills/` 安装路径的维护或修复。

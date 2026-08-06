@@ -21,10 +21,11 @@ python agent-dev/tools/dependency_index.py dependencies --project . --module :fe
 python agent-dev/tools/dependency_index.py classes --project . ItemStack
 python agent-dev/tools/dependency_index.py members --project . getDisplayName
 python agent-dev/tools/dependency_index.py members --project . addItem --type PlayerInventory
+python agent-dev/tools/dependency_index.py members --project . addItem --type PlayerInventory --verbose
 python agent-dev/tools/dependency_index.py show --project . --artifact top.mrxiaom:EvalEx-j8 --verbose
 ```
 
-默认最多输出 `8` 条。需要更多匹配时使用 `--limit`、`--offset`；对 `show` 使用 `--verbose` 取得本机主 JAR、sources/Javadoc 路径与哈希。随后按 `query-playbook.md` 优先直接读取 sources；sources 缺失时才临时 Vineflower 反编译主 JAR。自动化调用使用 `--json`。
+默认最多输出 `8` 条。需要更多匹配时使用 `--limit`、`--offset`；对 `members` 使用 `--verbose`，在签名下查看索引已唯一确认的 `Javadoc 页面` 和 `摘要`，自动化 JSON 结果包含 `javadoc`、`documentation` 字段。对 `show` 使用 `--verbose` 取得本机主 JAR、sources/Javadoc 路径与哈希。随后按 `query-playbook.md` 优先直接读取 sources；sources 缺失时才临时 Vineflower 反编译主 JAR。自动化调用使用 `--json`。
 
 ## 推荐顺序
 

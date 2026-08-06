@@ -26,6 +26,14 @@ agent-dev/
 
 依赖索引的运行 JAR `.class` 字节码是公开类型、字段、构造器、方法签名和继承关系的唯一权威来源。使用 `classes`、`members`、`dependencies` 和 `show` 定位实际 GAV、声明处、重定位后名称与资料路径；已知接收者类型时必须给 `members` 提供 `type`，让索引沿继承关系定位真实声明。
 
+需要像 IDE 悬停一样查看成员资料时，优先请求 `members` 的详细模式：Zoo 工具使用 `action: "members"`、`query`、`type` 与 `verbose: true`；无 Zoo 工具时使用：
+
+```text
+python agent-dev/tools/dependency_index.py members --project . <成员或签名> --type <接收者类型> --verbose
+```
+
+结果在签名下显示索引已唯一确认的 `Javadoc 页面` 和 `摘要`；JSON 同时提供 `javadoc`、`documentation` 字段。该查询只读取 SQLite，不重新扫描或打开 Javadoc 归档。资料关联有歧义或索引未能确认时不显示摘要，不得猜测。
+
 版本敏感调用不能只凭模糊搜索结果写入。还要根据返回的精确 GAV、哈希、源码位置或 Javadoc 摘要核对完整重载、弃用、注解、线程与语义。sources/Javadoc 与字节码不一致或重定位关联有歧义时，保留字节码签名并停止猜测。
 
 ## 查看依赖实现

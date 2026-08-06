@@ -19,16 +19,17 @@
 | 查询模块传递依赖 | `action: "dependencies"`、`module`、`transitive: true` |
 | 按类名或包关键词找类 | `action: "classes"`、`query` |
 | 查询方法、字段、类型或签名 | `action: "members"`、`query` |
+| 查看成员已确认的 Javadoc 页面与摘要 | `action: "members"`、`query`、`verbose: true` |
 | 沿继承链查接收者可见成员 | `action: "members"`、`query`、`type: "完整或简单类型名"` |
 | 查看构件摘要 | `action: "show"`、`query: "GAV 或哈希前缀"` |
 | 查看主 JAR、sources/Javadoc 路径与哈希 | `action: "show"`、`query: "GAV 或哈希前缀"`、`verbose: true` |
 
-`limit` 只在结果较多时设置，范围为 `1` 至 `20`。`dependencies` 可使用 `configuration` 限定 Gradle 配置。
+`members` 的 `verbose: true` 返回 SQLite 已保存且唯一确认的 `javadoc` 页面条目路径和 `documentation` 短摘要，不重新读取 Javadoc 归档；资料有歧义或缺失时不猜测。`limit` 只在结果较多时设置，范围为 `1` 至 `20`。`dependencies` 可使用 `configuration` 限定 Gradle 配置。
 
 ## 推荐顺序
 
 1. 陌生库先查询 `classes`，定位实际类和 GAV。
-2. 再用 `members` 查目标方法、字段或构造器；已知接收者类型时必须提供 `type`，让索引沿 `extends`/`implements` 关系定位真实声明处。
+2. 再用 `members` 查目标方法、字段或构造器；需要成员说明时同时提供 `verbose: true`。已知接收者类型时必须提供 `type`，让索引沿 `extends`/`implements` 关系定位真实声明处。
 3. 需要确认依赖来源或 Shadow/重定位影响时，用 `show` 或 `dependencies` 查询；需要实现细节时，以 `show` 的 `verbose: true` 取得主 JAR 与 `sources.jar` 路径，再按 `query-playbook.md` 直接读取 sources 或临时反编译。
 4. 结果不足时，不用 `javap` 反复试探，不自动同步；记录阻塞并按项目证据规则继续处理。
 

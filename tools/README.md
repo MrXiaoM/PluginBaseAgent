@@ -16,7 +16,10 @@ python agent-dev/tools/<脚本>.py ...
 
 ```text
 python agent-dev/tools/dependency_index.py sync --project .
+python agent-dev/tools/dependency_index.py sync --project . --workers 4
 ```
+
+`sync` 默认以最多 `8` 个工作线程并行读取不同构件的运行 JAR、源码和说明资料；SQLite 仍由主线程单独写入，避免跨线程数据库访问。可用 `--workers 1` 到 `--workers 8` 覆盖线程数；机械硬盘、内存较小或需排查问题时可使用 `--workers 1`。
 
 无 Zoo 工具时的常用查询：
 
@@ -25,14 +28,15 @@ python agent-dev/tools/dependency_index.py modules --project .
 python agent-dev/tools/dependency_index.py dependencies --project . --module :
 python agent-dev/tools/dependency_index.py classes --project . ItemStack
 python agent-dev/tools/dependency_index.py members --project . addItem --type PlayerInventory
+python agent-dev/tools/dependency_index.py members --project . echo --type example.api.Sample --verbose
 python agent-dev/tools/dependency_index.py show --project . --artifact top.mrxiaom:EvalEx-j8 --verbose
 ```
 
-全部类型、字段、构造器、方法签名和继承关系都从最终运行 JAR 的 `.class` 字节码获取；sources/Javadoc 仅补充唯一可确认的源码位置和短摘要，不会新增、删除或改写运行签名。`show --verbose` 返回主 JAR 的 `file`、资料构件的 `sources`/`javadoc` 本机路径与哈希。详细规则见 `../docs/evidence/dependency-index.md`。
+全部类型、字段、构造器、方法签名和继承关系都从最终运行 JAR 的 `.class` 字节码获取；多个工作线程会先读取不同构件，并按已发现类型关联必要的 `sources.jar` 与 Javadoc 页面，主线程首次写入公开成员时同时写入唯一可确认的源码位置和短摘要。建立流程不会再次更新同一成员，绝不会新增、删除或改写运行签名。全部基础数据写完后才创建普通查询索引和全文索引；因此方法签名查询仍可返回对应 Javadoc 路径和摘要。对成员查询加 `--verbose`，即可像 IDE 悬停一样在签名下显示已确认的 `Javadoc 页面` 与 `摘要`；自动化 JSON 结果同时给出 `javadoc` 与 `documentation` 字段。无法唯一关联的成员不会显示或猜测资料。同步进度会显示工作线程数、已写入构件数，以及运行字节码、源码、说明页面和资料连接；同一构件内每个命中的源码文件与说明页面最多读取一次。`show --verbose` 返回主 JAR 的 `file`、资料构件的 `sources`/`javadoc` 本机路径与哈希。详细规则见 `../docs/evidence/dependency-index.md`。
 
 ### Zoo Code 工具
 
-Skill 初始化器会创建 `./.roo/tools/pluginbase-dependency-index.js`，并在同目录安装 `zod@3.25.76`。Zoo 对 `.js` 工具直接加载，参数是固定 Zod schema，不提供任意 Shell 命令入口。`show` 可设置 `verbose: true`，以返回主 JAR 与 `sources.jar` 路径；工具加载后必须遵循 `../docs/evidence/dependency-index-zoo-tool.md`，不得改用本 CLI 查询。
+Skill 初始化器会创建 `./.roo/tools/pluginbase-dependency-index.js`，并在同目录安装 `zod@3.25.76`。Zoo 对 `.js` 工具直接加载，参数是固定 Zod schema，不提供任意 Shell 命令入口。`show` 可设置 `verbose: true`，以返回主 JAR 与 `sources.jar` 路径；`members` 设置 `verbose: true` 时返回已确认的成员 Javadoc 页面路径与摘要。工具加载后必须遵循 `../docs/evidence/dependency-index-zoo-tool.md`，不得改用本 CLI 查询。
 
 ## `inspect_dependency.py`
 

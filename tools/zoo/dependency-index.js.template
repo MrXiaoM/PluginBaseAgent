@@ -36,7 +36,7 @@ module.exports = {
     configuration: z.string().optional().describe("可选的 Gradle 配置名"),
     transitive: z.boolean().optional().describe("dependencies 是否附带传递依赖边"),
     limit: z.number().int().min(1).max(20).optional().describe("最大结果数，默认 8"),
-    verbose: z.boolean().optional().describe("show 是否附带主 JAR、sources/Javadoc 的本机路径与哈希"),
+    verbose: z.boolean().optional().describe("show 附带归档路径与哈希；members 附带已确认的 Javadoc 页面路径和摘要"),
   }),
   async execute({ action, query, module, type, configuration, transitive, limit, verbose }) {
     const args = [action]
@@ -44,6 +44,7 @@ module.exports = {
       if (!query?.trim()) return "错误：此查询需要 query。"
       args.push(query)
       if (action === "members" && type?.trim()) args.push("--type", type)
+      if (action === "members" && verbose) args.push("--verbose")
     }
     if (action === "show") {
       if (!query?.trim()) return "错误：show 需要 query。"

@@ -4,7 +4,9 @@
 from __future__ import annotations
 
 import argparse
-from collections import deque
+from collections import defaultdict, deque
+from concurrent.futures import ThreadPoolExecutor
+from html.parser import HTMLParser
 import hashlib
 import json
 import os
@@ -34,9 +36,10 @@ from common.evidence import (  # noqa: E402
 
 PROJECT_ROOT = SCRIPT_ROOT.parent
 STATE_ROOT = PROJECT_ROOT / "state"
-INDEX_SCHEMA_VERSION = 8
-TOOL_VERSION = "8"
+INDEX_SCHEMA_VERSION = 12
+TOOL_VERSION = "12"
 DEFAULT_LIMIT = 8
+MAX_ARTIFACT_WORKERS = 8
 MAX_LIMIT = 100
 CLASS_INSERT_BATCH_SIZE = 2_000
 API_INSERT_BATCH_SIZE = 2_000
@@ -141,6 +144,7 @@ def parser() -> argparse.ArgumentParser:
     sync_parser.add_argument("--gradle-user-home", help="单次 Gradle/资料缓存目录覆盖")
     sync_parser.add_argument("--configuration", action="append", default=[], help="只同步名称匹配的可解析配置，可重复")
     sync_parser.add_argument("--no-api", action="store_true", help="只索引依赖与类名，不读取 sources/Javadoc")
+    sync_parser.add_argument("--workers", type=int, help=f"并行处理构件的工作线程数，默认按 CPU 自动选择，最大 {MAX_ARTIFACT_WORKERS}")
 
     status_parser = subcommands.add_parser("status", help="显示 SQLite 索引摘要与是否过期")
     add_project_argument(status_parser)
@@ -188,7 +192,7 @@ def add_output_arguments(command: argparse.ArgumentParser) -> None:
     command.add_argument("--limit", type=int, default=DEFAULT_LIMIT, help=f"最大结果数，默认 {DEFAULT_LIMIT}")
     command.add_argument("--offset", type=int, default=0, help="跳过前 N 条结果")
     command.add_argument("--json", action="store_true", help="输出紧凑 JSON")
-    command.add_argument("--verbose", action="store_true", help="显示来源、路径、哈希等详情")
+    command.add_argument("--verbose", action="store_true", help="显示来源、路径、哈希及已确认的资料摘要等详情")
 
 
 def index_path(state_root: Path) -> Path:
@@ -665,21 +669,23 @@ def bytecode_member_records(data: bytes, entry_name: str) -> list[dict[str, Any]
         return []
 
 
-def iter_bytecode_api(archive: Path, progress_prefix: str) -> Iterator[dict[str, Any]]:
+def iter_bytecode_api(archive: Path, progress_prefix: str, report: bool = True) -> Iterator[dict[str, Any]]:
     """从缺失源码的二进制 JAR 流式提取可见 API；不加载或执行任何类。"""
     try:
         with zipfile.ZipFile(archive) as source:
             entries = [entry for entry in source.infolist() if is_indexable_class_entry(entry)]
             total = len(entries)
             if not total:
-                print(f"{progress_prefix}字节码结构 0/0", flush=True)
+                if report:
+                    print(f"{progress_prefix}字节码结构 0/0", flush=True)
                 return
             for processed, entry in enumerate(entries, start=1):
-                if processed == 1 or processed % 200 == 0 or processed == total:
+                if report and (processed == 1 or processed % 200 == 0 or processed == total):
                     print(f"{progress_prefix}字节码结构 {processed}/{total}", flush=True)
                 yield from bytecode_member_records(source.read(entry), entry.filename)
     except zipfile.BadZipFile:
-        print(f"{progress_prefix}字节码归档无效，已跳过", flush=True)
+        if report:
+            print(f"{progress_prefix}字节码归档无效，已跳过", flush=True)
 
 
 def strip_java_comments(line: str, in_block: bool) -> tuple[str, bool]:
@@ -847,76 +853,247 @@ def members_compatible(runtime: dict[str, Any], candidate: dict[str, Any], check
     return not check_result or types_compatible(runtime_result, candidate_result)
 
 
-def html_text(value: str) -> str:
-    value = re.sub(r"<script\b[^>]*>.*?</script>|<style\b[^>]*>.*?</style>", "", value, flags=re.IGNORECASE | re.DOTALL)
-    return compact_text(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", value)).strip(), 420)
+def member_lookup_key(record: dict[str, Any]) -> tuple[str, str, int]:
+    kind, name, parameters, _ = declaration_signature(record)
+    return kind, name, len(parameters)
+
+
+class JavadocPageParser(HTMLParser):
+    """顺序读取一个 Javadoc 类型页；每个页面只分析一次。"""
+
+    def __init__(self):
+        super().__init__(convert_charrefs=True)
+        self.last_identifier: str | None = None
+        self.type_summary: str | None = None
+        self.member_summaries: dict[str, list[str]] = defaultdict(list)
+        self.member_summaries_by_name: dict[str, list[tuple[str, str]]] = defaultdict(list)
+        self._capture_identifier: str | None = None
+        self._capture_depth = 0
+        self._capture_text: list[str] = []
+
+    @staticmethod
+    def _attribute(attributes: list[tuple[str, str | None]], name: str) -> str:
+        for key, value in attributes:
+            if key.casefold() == name:
+                return value or ""
+        return ""
+
+    def handle_starttag(self, tag: str, attributes: list[tuple[str, str | None]]) -> None:
+        identifier = self._attribute(attributes, "id")
+        if identifier:
+            self.last_identifier = identifier
+        classes = self._attribute(attributes, "class").split()
+        if tag.casefold() == "div" and "block" in classes and not self._capture_depth:
+            self._capture_identifier = self.last_identifier
+            self._capture_depth = 1
+            self._capture_text = []
+        elif self._capture_depth and tag.casefold() == "div":
+            self._capture_depth += 1
+
+    def handle_endtag(self, tag: str) -> None:
+        if not self._capture_depth or tag.casefold() != "div":
+            return
+        self._capture_depth -= 1
+        if self._capture_depth:
+            return
+        summary = compact_text(" ".join(" ".join(self._capture_text).split()), 420)
+        if summary:
+            if self._capture_identifier:
+                self.member_summaries[self._capture_identifier].append(summary)
+                self.member_summaries_by_name[javadoc_anchor_name(self._capture_identifier)].append((self._capture_identifier, summary))
+            elif self.type_summary is None:
+                self.type_summary = summary
+        self._capture_identifier = None
+        self._capture_text = []
+
+    def handle_data(self, data: str) -> None:
+        if self._capture_depth:
+            self._capture_text.append(data)
+
+
+def javadoc_anchor_name(identifier: str) -> str:
+    end = len(identifier)
+    for marker in ("(", ":"):
+        position = identifier.find(marker)
+        if position >= 0:
+            end = min(end, position)
+    return identifier[:end]
+
+
+def javadoc_anchor_parameters(identifier: str) -> str | None:
+    start = identifier.find("(")
+    end = identifier.rfind(")")
+    return identifier[start + 1:end] if start >= 0 and end > start else None
+
+
+def parse_javadoc_page(document: str) -> JavadocPageParser:
+    parser = JavadocPageParser()
+    parser.feed(document)
+    parser.close()
+    return parser
 
 
 def javadoc_member_summaries(document: str, names: set[str]) -> dict[str, str]:
-    """单次扫描类型页面，避免为每个公开成员重复搜索完整 Javadoc HTML。"""
+    """兼容验证工具：从单次页面分析结果中返回指定成员的首个摘要。"""
+    page = parse_javadoc_page(document)
     result: dict[str, str] = {}
-    for match in re.finditer(r'id="([^"]+)"', document, flags=re.IGNORECASE):
-        identifier = match.group(1)
-        name = re.split(r"[(:]", identifier, maxsplit=1)[0]
-        if name not in names or name in result:
-            continue
-        block = re.search(r'<div class="block">(.*?)</div>', document[match.end():], flags=re.IGNORECASE | re.DOTALL)
-        if block:
-            result[name] = html_text(block.group(1))
+    for identifier, summaries in page.member_summaries.items():
+        name = javadoc_anchor_name(identifier)
+        if name in names and name not in result and summaries:
+            result[name] = summaries[0]
     return result
 
 
-def add_javadoc_summaries(records: list[dict[str, Any]], source: zipfile.ZipFile) -> None:
-    by_owner: dict[str, list[dict[str, Any]]] = {}
-    for record in records:
-        by_owner.setdefault(str(record["owner"]), []).append(record)
-    for owner, owner_records in by_owner.items():
-        path = owner.replace(".", "/") + ".html"
-        try:
-            document = source.read(path).decode("utf-8", errors="replace")
-        except KeyError:
+def source_tokens(document: str) -> list[tuple[str, int]]:
+    """逐字符读取 Java 源码，跳过注释、字符串与字符常量。"""
+    result: list[tuple[str, int]] = []
+    index = line = 0
+    length = len(document)
+    while index < length:
+        character = document[index]
+        if character.isspace():
+            line += character == "\n"
+            index += 1
             continue
-        blocks = re.findall(r'<div class="block">(.*?)</div>', document, flags=re.IGNORECASE | re.DOTALL)
-        summary = html_text(blocks[0]) if blocks else ""
-        for record in owner_records:
-            record["javadoc"] = path
-            if record["kind"] == "type":
-                record["documentation"] = summary or None
-                continue
-            anchors = []
-            for match in re.finditer(r'id="([^"]+)"', document, flags=re.IGNORECASE):
-                identifier = match.group(1)
-                name = re.split(r"[(:]", identifier, maxsplit=1)[0]
-                if name != record["name"]:
+        if document.startswith("//", index):
+            end = document.find("\n", index + 2)
+            if end < 0:
+                break
+            line += 1
+            index = end + 1
+            continue
+        if document.startswith("/*", index):
+            end = document.find("*/", index + 2)
+            end = length if end < 0 else end + 2
+            line += document.count("\n", index, end)
+            index = end
+            continue
+        if character in {'"', "'"}:
+            quote = character
+            index += 1
+            while index < length:
+                if document[index] == "\\":
+                    index += 2
                     continue
-                if "(" in identifier:
-                    parameters = identifier.split("(", 1)[1].rsplit(")", 1)[0]
-                    candidate = {"kind": record["kind"], "name": record["name"], "declaration": f"public void {record['name']}({parameters})"}
-                    if not members_compatible(record, candidate, check_result=False):
-                        continue
-                elif record["kind"] != "field":
-                    continue
-                block = re.search(r'<div class="block">(.*?)</div>', document[match.end():], flags=re.IGNORECASE | re.DOTALL)
-                if block:
-                    anchors.append(html_text(block.group(1)))
-            record["documentation"] = anchors[0] if len(anchors) == 1 else None
+                if document[index] == quote:
+                    index += 1
+                    break
+                line += document[index] == "\n"
+                index += 1
+            continue
+        if character.isidentifier() or character in "$_":
+            end = index + 1
+            while end < length and (document[end].isalnum() or document[end] in "$_"):
+                end += 1
+            result.append((document[index:end], line + 1))
+            index = end
+            continue
+        if document.startswith("...", index):
+            result.append(("...", line + 1))
+            index += 3
+            continue
+        result.append((character, line + 1))
+        index += 1
+    return result
+
+
+def source_package_and_type(tokens: list[tuple[str, int]]) -> tuple[str, str, int] | None:
+    package = ""
+    for index, (value, _) in enumerate(tokens):
+        if value == "package":
+            parts: list[str] = []
+            cursor = index + 1
+            while cursor < len(tokens) and tokens[cursor][0] != ";":
+                parts.append(tokens[cursor][0])
+                cursor += 1
+            package = "".join(parts)
+            continue
+        if value in {"class", "interface", "enum", "record"} and index + 1 < len(tokens):
+            name, line = tokens[index + 1]
+            return package, name, line
+    return None
+
+
+def source_member_candidates(tokens: list[tuple[str, int]], owner: str, source_path: str) -> list[dict[str, Any]]:
+    """只读取类型最外层的声明候选；方法体中的调用绝不作为成员位置。"""
+    result: list[dict[str, Any]] = []
+    ignored = {"if", "for", "while", "switch", "catch", "new", "return", "throw", "this", "super"}
+    modifiers = {"public", "protected", "private", "static", "final", "volatile", "transient"}
+    type_start = next((index for index, (value, _) in enumerate(tokens) if value in {"class", "interface", "enum", "record"}), None)
+    if type_start is None:
+        return result
+    opening = next((index for index in range(type_start + 1, len(tokens)) if tokens[index][0] == "{"), None)
+    if opening is None:
+        return result
+    body_depth = 1
+    index = opening + 1
+    while index < len(tokens) and body_depth:
+        name, line = tokens[index]
+        if name == "{":
+            body_depth += 1
+            index += 1
+            continue
+        if name == "}":
+            body_depth -= 1
+            index += 1
+            continue
+        if body_depth != 1:
+            index += 1
+            continue
+        if name not in ignored and index + 1 < len(tokens) and tokens[index + 1][0] in {";", "=", ","}:
+            start = index - 1
+            while start >= opening and tokens[start][0] not in {";", "{", "}"}:
+                start -= 1
+            declaration_tokens = [value for value, _ in tokens[start + 1:index] if value not in modifiers]
+            field_type = declaration_tokens[-1] if declaration_tokens else ""
+            if field_type:
+                result.append({"kind": "field", "owner": owner, "name": name, "declaration": f"public {field_type} {name}", "source": source_path, "line": line, "supertypes": [], "javadoc": None, "documentation": None})
+            index += 1
+            continue
+        if name in ignored or index + 1 >= len(tokens) or tokens[index + 1][0] != "(":
+            index += 1
+            continue
+        depth = cursor = 0
+        parameters: list[str] = []
+        current: list[str] = []
+        while index + 1 + cursor < len(tokens):
+            value = tokens[index + 1 + cursor][0]
+            if value == "(":
+                depth += 1
+            elif value == ")":
+                depth -= 1
+                if not depth:
+                    if current:
+                        parameters.append(" ".join(current))
+                    break
+            elif value == "," and depth == 1:
+                parameters.append(" ".join(current))
+                current = []
+            elif depth:
+                current.append(value)
+            cursor += 1
+        if depth:
+            index += 1
+            continue
+        next_value = tokens[index + 2 + cursor][0] if index + 2 + cursor < len(tokens) else ""
+        if next_value not in {"{", ";", "throws"}:
+            index += 1
+            continue
+        kind = "constructor" if name == owner.rsplit(".", 1)[-1] else "method"
+        result.append({"kind": kind, "owner": owner, "name": name, "declaration": f"public void {name}({', '.join(parameters)})", "source": source_path, "line": line, "supertypes": [], "javadoc": None, "documentation": None})
+        index += 1
+    return result
 
 
 class SourceApiLookup:
-    """惰性读取资料归档，只为最终二进制类补全可唯一确认的文档。"""
+    """在字节码提取完成后，按需读取资料并保守补充既有记录。"""
 
     def __init__(self, source_archive: Path | None, javadoc_archive: Path | None):
         self.sources = zipfile.ZipFile(source_archive) if source_archive else None
         self.javadocs = zipfile.ZipFile(javadoc_archive) if javadoc_archive else None
-        self.by_path: dict[str, zipfile.ZipInfo] = {}
-        self.by_simple_name: dict[str, list[zipfile.ZipInfo]] = {}
-        self.cache: dict[str, list[dict[str, Any]]] = {}
-        if self.sources:
-            for entry in self.sources.infolist():
-                if entry.is_dir() or not entry.filename.endswith(".java"):
-                    continue
-                self.by_path[entry.filename] = entry
-                self.by_simple_name.setdefault(Path(entry.filename).stem, []).append(entry)
+        self.by_simple_name: dict[str, list[zipfile.ZipInfo]] | None = None
+        self.source_cache: dict[str, tuple[str, str, int, dict[tuple[str, str, int], list[dict[str, Any]]]]] = {}
+        self.javadoc_cache: dict[str, JavadocPageParser | None] = {}
 
     def close(self) -> None:
         if self.javadocs:
@@ -924,81 +1101,131 @@ class SourceApiLookup:
         if self.sources:
             self.sources.close()
 
-    def records(self, entry: zipfile.ZipInfo) -> list[dict[str, Any]]:
-        cached = self.cache.get(entry.filename)
+    def source_entry(self, runtime_owner: str) -> zipfile.ZipInfo | None:
+        """优先通过 ZIP 目录精确查找；仅重定位回退时枚举一次源码文件名。"""
+        if not self.sources:
+            return None
+        try:
+            return self.sources.getinfo(runtime_owner.replace(".", "/") + ".java")
+        except KeyError:
+            pass
+        if self.by_simple_name is None:
+            indexed: dict[str, list[zipfile.ZipInfo]] = defaultdict(list)
+            for entry in self.sources.infolist():
+                if not entry.is_dir() and entry.filename.endswith(".java"):
+                    indexed[Path(entry.filename).stem].append(entry)
+            self.by_simple_name = indexed
+        candidates = self.by_simple_name.get(runtime_owner.rsplit(".", 1)[-1], [])
+        return candidates[0] if len(candidates) == 1 else None
+
+    def source_data(self, entry: zipfile.ZipInfo) -> tuple[str, str, int, dict[tuple[str, str, int], list[dict[str, Any]]]] | None:
+        cached = self.source_cache.get(entry.filename)
         if cached is not None:
             return cached
-        lines = self.sources.read(entry).decode("utf-8", errors="replace").splitlines() if self.sources else []
-        package, imports = "", {}
-        for line in lines[:200]:
-            found = re.match(r"\s*package\s+([\w.]+)\s*;", line)
-            if found:
-                package = found.group(1)
-            imported = re.match(r"\s*import\s+(?:static\s+)?([\w.]+)\s*;", line)
-            if imported and not imported.group(1).endswith(".*"):
-                qualified = imported.group(1)
-                imports[qualified.rsplit(".", 1)[-1]] = qualified
-        records = java_public_declarations(lines, package, imports, entry.filename)
-        if self.javadocs and records:
-            add_javadoc_summaries(records, self.javadocs)
-        if len(self.cache) >= 256:
-            self.cache.pop(next(iter(self.cache)))
-        self.cache[entry.filename] = records
-        return records
+        if not self.sources:
+            return None
+        tokens = source_tokens(self.sources.read(entry).decode("utf-8", errors="replace"))
+        parsed = source_package_and_type(tokens)
+        if not parsed:
+            return None
+        package, name, type_line = parsed
+        owner = f"{package}.{name}" if package else name
+        members_by_key: dict[tuple[str, str, int], list[dict[str, Any]]] = defaultdict(list)
+        for member in source_member_candidates(tokens, owner, entry.filename):
+            members_by_key[member_lookup_key(member)].append(member)
+        data = (owner, entry.filename, type_line, members_by_key)
+        self.source_cache[entry.filename] = data
+        return data
 
-    def enrich(self, runtime_records: list[dict[str, Any]]) -> None:
-        if not self.sources or not runtime_records:
+    def page(self, path: str) -> JavadocPageParser | None:
+        if path in self.javadoc_cache:
+            return self.javadoc_cache[path]
+        if not self.javadocs:
+            return None
+        try:
+            parsed = parse_javadoc_page(self.javadocs.read(path).decode("utf-8", errors="replace"))
+        except KeyError:
+            parsed = None
+        self.javadoc_cache[path] = parsed
+        return parsed
+
+    @staticmethod
+    def progress(progress_prefix: str, label: str, processed: int, total: int, report: bool) -> None:
+        if not report:
             return
-        owner = str(runtime_records[0]["owner"])
-        entry = self.by_path.get(owner.replace(".", "/") + ".java")
-        if not entry:
-            candidates = self.by_simple_name.get(owner.rsplit(".", 1)[-1], [])
-            if len(candidates) != 1:
-                return
-            entry = candidates[0]
-        candidates = self.records(entry)
-        source_types = [record for record in candidates if record["kind"] == "type" and record["name"] == owner.rsplit(".", 1)[-1]]
-        if len(source_types) != 1:
+        if not total:
+            print(f"{progress_prefix}{label} 0/0", flush=True)
+        elif processed == 1 or processed % 100 == 0 or processed == total:
+            print(f"{progress_prefix}{label} {processed}/{total}", flush=True)
+
+    def enrich(self, records: list[dict[str, Any]], progress_prefix: str, report: bool = True) -> None:
+        if not records or not (self.sources or self.javadocs):
             return
-        source_type = source_types[0]
-        source_members = [record for record in candidates if record["owner"] == source_type["owner"] and record["kind"] != "type"]
-        for runtime in runtime_records:
-            if runtime["kind"] == "type":
-                runtime["source"] = source_type["source"]
-                runtime["line"] = source_type["line"]
-                runtime["javadoc"] = source_type["javadoc"]
-                runtime["documentation"] = source_type["documentation"]
-                continue
-            matches = [candidate for candidate in source_members if candidate["documentation"] and members_compatible(runtime, candidate)]
-            if len(matches) == 1:
-                runtime["source"] = matches[0]["source"]
-                runtime["line"] = matches[0]["line"]
-                runtime["javadoc"] = matches[0]["javadoc"]
-                runtime["documentation"] = matches[0]["documentation"]
+        by_owner: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for record in records:
+            by_owner[str(record["owner"])].append(record)
+        plans = [(owner, owner_records, self.source_entry(owner)) for owner, owner_records in by_owner.items()]
+
+        source_entries = {entry.filename: entry for _, _, entry in plans if entry}
+        source_data_by_path: dict[str, tuple[str, str, int, dict[tuple[str, str, int], list[dict[str, Any]]]] | None] = {}
+        if self.sources:
+            for processed, entry in enumerate(source_entries.values(), start=1):
+                self.progress(progress_prefix, "读取源码", processed, len(source_entries), report)
+                source_data_by_path[entry.filename] = self.source_data(entry)
+            if not source_entries:
+                self.progress(progress_prefix, "读取源码", 0, 0, report)
+
+        page_paths: dict[str, None] = {}
+        plan_pages: dict[str, str] = {}
+        if self.javadocs:
+            for runtime_owner, _, entry in plans:
+                source_data = source_data_by_path.get(entry.filename) if entry else None
+                source_owner = source_data[0] if source_data else runtime_owner
+                path = source_owner.replace(".", "/") + ".html"
+                plan_pages[runtime_owner] = path
+                page_paths[path] = None
+            for processed, path in enumerate(page_paths, start=1):
+                self.progress(progress_prefix, "读取说明页面", processed, len(page_paths), report)
+                self.page(path)
+            if not page_paths:
+                self.progress(progress_prefix, "读取说明页面", 0, 0, report)
+
+        for processed, (runtime_owner, owner_records, entry) in enumerate(plans, start=1):
+            self.progress(progress_prefix, "连接资料", processed, len(plans), report)
+            source_data = source_data_by_path.get(entry.filename) if entry else None
+            page_path = plan_pages.get(runtime_owner)
+            page = self.javadoc_cache.get(page_path) if page_path else None
+            for runtime in owner_records:
+                if source_data:
+                    _, source_path, type_line, members_by_key = source_data
+                    runtime["source"] = source_path
+                    runtime["line"] = type_line if runtime["kind"] == "type" else 0
+                    if runtime["kind"] != "type":
+                        matches = [candidate for candidate in members_by_key.get(member_lookup_key(runtime), []) if members_compatible(runtime, candidate, check_result=False)]
+                        if len(matches) == 1:
+                            runtime["line"] = matches[0]["line"]
+                if not page or not page_path:
+                    continue
+                runtime["javadoc"] = page_path
+                if runtime["kind"] == "type":
+                    runtime["documentation"] = page.type_summary
+                    continue
+                summaries: list[str] = []
+                for identifier, summary in page.member_summaries_by_name.get(str(runtime["name"]), []):
+                    parameters = javadoc_anchor_parameters(identifier)
+                    if parameters is None:
+                        if runtime["kind"] == "field":
+                            summaries.append(summary)
+                        continue
+                    candidate = {"kind": runtime["kind"], "name": runtime["name"], "declaration": f"public void {runtime['name']}({parameters})"}
+                    if members_compatible(runtime, candidate, check_result=False):
+                        summaries.append(summary)
+                runtime["documentation"] = summaries[0] if len(summaries) == 1 else None
 
 
-def iter_runtime_api(archive: Path, source_archive: Path | None, javadoc_archive: Path | None, progress_prefix: str) -> Iterator[dict[str, Any]]:
-    """运行 JAR 字节码决定签名；sources/Javadoc 只按唯一结构匹配补全文档。"""
-    lookup: SourceApiLookup | None = None
-    try:
-        lookup = SourceApiLookup(source_archive, javadoc_archive)
-        with zipfile.ZipFile(archive) as binary:
-            entries = [entry for entry in binary.infolist() if is_indexable_class_entry(entry)]
-            total = len(entries)
-            if not total:
-                print(f"{progress_prefix}字节码结构 0/0", flush=True)
-                return
-            for processed, entry in enumerate(entries, start=1):
-                if processed == 1 or processed % 200 == 0 or processed == total:
-                    print(f"{progress_prefix}字节码结构 {processed}/{total}", flush=True)
-                records = bytecode_member_records(binary.read(entry), entry.filename)
-                lookup.enrich(records)
-                yield from records
-    except zipfile.BadZipFile:
-        print(f"{progress_prefix}字节码归档无效，已跳过", flush=True)
-    finally:
-        if lookup:
-            lookup.close()
+def iter_runtime_api(archive: Path, progress_prefix: str, report: bool = True) -> Iterator[dict[str, Any]]:
+    """从运行 JAR 单次提取公开字节码记录；不在该阶段读取资料归档。"""
+    yield from iter_bytecode_api(archive, progress_prefix, report)
 
 
 def open_database(path: Path, writable: bool = False) -> sqlite3.Connection:
@@ -1026,11 +1253,6 @@ def create_schema(connection: sqlite3.Connection) -> None:
         CREATE TABLE api (id INTEGER PRIMARY KEY, artifact_id TEXT NOT NULL, kind TEXT NOT NULL, owner TEXT NOT NULL, name TEXT NOT NULL, declaration TEXT NOT NULL, source_path TEXT NOT NULL, source_line INTEGER NOT NULL, javadoc_path TEXT, documentation TEXT);
         CREATE TABLE type_edges (child_owner TEXT NOT NULL, parent_owner TEXT NOT NULL, PRIMARY KEY(child_owner, parent_owner));
         CREATE TABLE archive_hashes (path TEXT PRIMARY KEY, size INTEGER NOT NULL, modified_ns INTEGER NOT NULL, sha256 TEXT NOT NULL);
-        CREATE INDEX classes_artifact_idx ON classes(artifact_id);
-        CREATE INDEX api_owner_idx ON api(owner);
-        CREATE INDEX api_artifact_idx ON api(artifact_id);
-        CREATE INDEX edges_parent_idx ON type_edges(parent_owner);
-        CREATE INDEX configurations_module_idx ON configurations(module_path);
         CREATE VIRTUAL TABLE class_search USING fts5(name, binary_name, content='classes', content_rowid='id', tokenize='unicode61', prefix='2 3 4');
         CREATE VIRTUAL TABLE api_search USING fts5(owner, name, declaration, documentation, content='api', content_rowid='id', tokenize='unicode61', prefix='2 3 4');
     """)
@@ -1077,32 +1299,121 @@ def insert_public_api(connection: sqlite3.Connection, records: Iterable[dict[str
     flush()
 
 
-def insert_artifact(connection: sqlite3.Connection, raw: dict[str, Any], identifier: str, artifact_sha256: str | None, hashes: ArchiveHashCache, include_api: bool, position: int, total: int) -> None:
+def create_query_indexes(connection: sqlite3.Connection) -> None:
+    """基础数据全部写完后一次创建查询索引，避免插入期间重复维护 B 树。"""
+    connection.executescript("""
+        CREATE INDEX classes_artifact_idx ON classes(artifact_id);
+        CREATE INDEX api_owner_idx ON api(owner);
+        CREATE INDEX api_artifact_idx ON api(artifact_id);
+        CREATE INDEX edges_parent_idx ON type_edges(parent_owner);
+        CREATE INDEX configurations_module_idx ON configurations(module_path);
+    """)
+
+
+def artifact_workers(value: int | None) -> int:
+    default = min(MAX_ARTIFACT_WORKERS, max(1, (os.cpu_count() or 2) // 2))
+    return min(MAX_ARTIFACT_WORKERS, max(1, value if value is not None else default))
+
+
+def prepare_artifact_task(raw: dict[str, Any], identifier: str, artifact_sha256: str | None, hashes: ArchiveHashCache, include_api: bool, position: int, total: int) -> dict[str, Any]:
     path = native_path(str(raw.get("file", "")))
-    if not path.is_file():
-        connection.execute("INSERT INTO artifacts(id, file_name, file_path, api_status) VALUES (?, ?, ?, ?)", (identifier, path.name, str(path), "missing"))
-        return
     coordinate = valid_coordinate(raw)
-    label = ":".join(coordinate) if coordinate else path.name
-    prefix = f"[3/4] 构件 {position}/{total} {label}："
-    print(prefix + "扫描类名", flush=True)
-    insert_class_names(connection, path, identifier, prefix)
-    if coordinate and include_api:
-        print(prefix + "读取 Gradle 已解析的 sources 与 Javadoc 归档", flush=True)
     source_reference = reference_archive(raw, "sources", hashes) if include_api else None
     javadoc_reference = reference_archive(raw, "javadoc", hashes) if include_api else None
     sources_info = source_reference[1] if source_reference else None
     javadoc_info = javadoc_reference[1] if javadoc_reference else None
     api_status = "not-requested" if not include_api else ("bytecode-with-sources-and-javadoc" if source_reference and javadoc_reference else "bytecode-with-sources" if source_reference else "bytecode-with-javadoc" if javadoc_reference else "bytecode")
+    return {"raw": raw, "identifier": identifier, "sha256": artifact_sha256, "path": path, "coordinate": coordinate, "include_api": include_api, "source_archive": source_reference[0] if source_reference else None, "javadoc_archive": javadoc_reference[0] if javadoc_reference else None, "sources_info": sources_info, "javadoc_info": javadoc_info, "api_status": api_status, "position": position, "total": total}
+
+
+def process_artifact_task(task: dict[str, Any]) -> dict[str, Any]:
+    """工作线程只读取归档并构造纯数据；绝不访问 SQLite。"""
+    path = task["path"]
+    if not path.is_file():
+        return {**task, "class_rows": [], "records": [], "missing": True}
+    try:
+        with zipfile.ZipFile(path) as archive:
+            entries = [entry for entry in archive.infolist() if is_indexable_class_entry(entry)]
+            identifier = task["identifier"]
+            class_rows = [(identifier, entry.filename[:-6].replace("/", ".").replace("$", "."), entry.filename[:-6].replace("/", ".")) for entry in entries]
+            records = [record for entry in entries for record in bytecode_member_records(archive.read(entry), entry.filename)] if task["include_api"] else []
+        source_archive = task["source_archive"]
+        if source_archive and records:
+            lookup = SourceApiLookup(source_archive, task["javadoc_archive"])
+            try:
+                lookup.enrich(records, "", report=False)
+            finally:
+                lookup.close()
+        return {**task, "class_rows": class_rows, "records": records, "missing": False}
+    except zipfile.BadZipFile:
+        return {**task, "class_rows": [], "records": [], "missing": False, "invalid": True}
+
+
+def insert_class_rows(connection: sqlite3.Connection, rows: list[tuple[str, str, str]]) -> None:
+    for start in range(0, len(rows), CLASS_INSERT_BATCH_SIZE):
+        connection.executemany("INSERT INTO classes(artifact_id, name, binary_name) VALUES (?, ?, ?)", rows[start:start + CLASS_INSERT_BATCH_SIZE])
+
+
+def write_artifact_result(connection: sqlite3.Connection, result: dict[str, Any]) -> None:
+    """仅由主线程写入 SQLite，保持一个连接和一个事务。"""
+    raw, identifier, path = result["raw"], result["identifier"], result["path"]
+    coordinate = result["coordinate"]
+    sources_info, javadoc_info = result["sources_info"], result["javadoc_info"]
     connection.execute("""
         INSERT INTO artifacts(id, group_name, artifact_name, version, classifier, extension, file_name, file_path, sha256, sources_sha256, sources_origin, sources_source, javadoc_sha256, javadoc_origin, javadoc_source, api_status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-    """, (identifier, *(coordinate or (None, None, None)), str(raw.get("classifier", "")), str(raw.get("extension", "")), path.name, str(path), artifact_sha256, *(sources_info[key] if sources_info else None for key in ("sha256", "origin", "source")), *(javadoc_info[key] if javadoc_info else None for key in ("sha256", "origin", "source")), api_status))
-    if include_api:
-        source_archive = source_reference[0] if source_reference else None
-        javadoc_archive = javadoc_reference[0] if javadoc_reference else None
-        print(prefix + ("以字节码签名关联 sources/Javadoc" if source_archive and javadoc_archive else "以字节码签名关联 sources" if source_archive else "读取字节码结构"), flush=True)
-        insert_public_api(connection, iter_runtime_api(path, source_archive, javadoc_archive, prefix), identifier)
+    """, (identifier, *(coordinate or (None, None, None)), str(raw.get("classifier", "")), str(raw.get("extension", "")), path.name, str(path), result["sha256"], *(sources_info[key] if sources_info else None for key in ("sha256", "origin", "source")), *(javadoc_info[key] if javadoc_info else None for key in ("sha256", "origin", "source")), "missing" if result.get("missing") else result["api_status"]))
+    if result.get("invalid"):
+        return
+    insert_class_rows(connection, result["class_rows"])
+    records = result["records"]
+    if records:
+        insert_public_api(connection, records, identifier)
+
+
+def process_artifact_tasks(tasks: list[dict[str, Any]], workers: int) -> Iterator[dict[str, Any]]:
+    """工作线程生产构件数据，调用线程消费结果并负责所有 SQLite 写入。"""
+    task_queue: queue.Queue[dict[str, Any] | None] = queue.Queue()
+    result_queue: queue.Queue[tuple[dict[str, Any] | None, BaseException | None]] = queue.Queue(maxsize=max(1, workers * 2))
+    cancelled = threading.Event()
+
+    def worker() -> None:
+        while not cancelled.is_set():
+            task = task_queue.get()
+            try:
+                if task is None:
+                    return
+                result: dict[str, Any] | None = process_artifact_task(task)
+                failure: BaseException | None = None
+            except BaseException as error:
+                result, failure = None, error
+            finally:
+                task_queue.task_done()
+            while not cancelled.is_set():
+                try:
+                    result_queue.put((result, failure), timeout=0.1)
+                    break
+                except queue.Full:
+                    continue
+
+    threads = [threading.Thread(target=worker, name=f"pluginbase-agent-artifact-{index + 1}", daemon=True) for index in range(workers)]
+    for thread in threads:
+        thread.start()
+    for task in tasks:
+        task_queue.put(task)
+    for _ in threads:
+        task_queue.put(None)
+    try:
+        for _ in tasks:
+            result, failure = result_queue.get()
+            if failure:
+                raise failure
+            if result is not None:
+                yield result
+    finally:
+        cancelled.set()
+        for thread in threads:
+            thread.join(timeout=1)
 
 
 def remove_legacy_index_state(state_root: Path) -> None:
@@ -1139,6 +1450,7 @@ def build_database(arguments: argparse.Namespace, database: Path) -> None:
     try:
         create_schema(connection)
         connection.execute("BEGIN")
+        configuration_artifacts: list[tuple[int, str]] = []
         for project_data in raw["projects"]:
             connection.execute("INSERT INTO modules(path, name) VALUES (?, ?)", (str(project_data.get("path", "")), str(project_data.get("name", ""))))
             for config in project_data.get("configurations", []):
@@ -1148,14 +1460,21 @@ def build_database(arguments: argparse.Namespace, database: Path) -> None:
                     connection.execute("INSERT INTO dependencies(configuration_id, kind, requested, selected, failure) VALUES (?, ?, ?, ?, NULL)", (config_id, str(dependency.get("kind", "")), str(dependency.get("requested", "")), str(dependency.get("selected", ""))))
                 for failure in config.get("failures", []):
                     connection.execute("INSERT INTO dependencies(configuration_id, kind, requested, selected, failure) VALUES (?, 'failed', '', '', ?)", (config_id, compact_text(str(failure), 500)))
-                for artifact in config.get("artifacts", []):
-                    identifier = artifact_id(artifact, archive_hashes)
-                    if connection.execute("SELECT 1 FROM artifacts WHERE id = ?", (identifier,)).fetchone() is None:
-                        raw_artifact = unique[identifier]
-                        artifact_path = native_path(str(raw_artifact.get("file", "")))
-                        artifact_sha256 = archive_hashes.digest(artifact_path) if artifact_path.is_file() else None
-                        insert_artifact(connection, raw_artifact, identifier, artifact_sha256, archive_hashes, not arguments.no_api, connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0] + 1, len(unique))
-                    connection.execute("INSERT OR IGNORE INTO configuration_artifacts(configuration_id, artifact_id) VALUES (?, ?)", (config_id, identifier))
+                configuration_artifacts.extend((config_id, artifact_id(artifact, archive_hashes)) for artifact in config.get("artifacts", []))
+        tasks: list[dict[str, Any]] = []
+        for position, (identifier, raw_artifact) in enumerate(unique.items(), start=1):
+            artifact_path = native_path(str(raw_artifact.get("file", "")))
+            artifact_sha256 = archive_hashes.digest(artifact_path) if artifact_path.is_file() else None
+            tasks.append(prepare_artifact_task(raw_artifact, identifier, artifact_sha256, archive_hashes, not arguments.no_api, position, len(unique)))
+        workers = artifact_workers(getattr(arguments, "workers", None))
+        print(f"[3/4] 使用 {workers} 个工作线程并行读取 {len(tasks)} 个构件；SQLite 写入保持单线程…", flush=True)
+        written = 0
+        for result in process_artifact_tasks(tasks, workers):
+            write_artifact_result(connection, result)
+            written += 1
+            label = ":".join(result["coordinate"]) if result["coordinate"] else result["path"].name
+            print(f"[3/4] 已写入构件 {written}/{len(tasks)}：{label}（类 {len(result['class_rows'])}，公开成员 {len(result['records'])}）", flush=True)
+        connection.executemany("INSERT OR IGNORE INTO configuration_artifacts(configuration_id, artifact_id) VALUES (?, ?)", configuration_artifacts)
         current_fingerprint = fingerprint(project)
         metadata_entries = {
             "schemaVersion": str(INDEX_SCHEMA_VERSION), "toolVersion": TOOL_VERSION, "projectPath": str(project),
@@ -1164,7 +1483,8 @@ def build_database(arguments: argparse.Namespace, database: Path) -> None:
         }
         connection.executemany("INSERT INTO metadata(key, value) VALUES (?, ?)", metadata_entries.items())
         connection.executemany("INSERT INTO archive_hashes(path, size, modified_ns, sha256) VALUES (?, ?, ?, ?)", archive_hashes.rows())
-        print("[4/4] 正在建立类名与公开 API 全文索引并完成 SQLite 写入…", flush=True)
+        print("[4/4] 正在建立查询索引与类名、公开 API 全文索引并完成 SQLite 写入…", flush=True)
+        create_query_indexes(connection)
         connection.execute("INSERT INTO class_search(class_search) VALUES ('rebuild')")
         connection.execute("INSERT INTO api_search(api_search) VALUES ('rebuild')")
         connection.commit()
@@ -1313,6 +1633,20 @@ def ancestor_distances(connection: sqlite3.Connection, requested: str) -> dict[s
     return found
 
 
+def member_text(row: sqlite3.Row, gav: str, inheritance_distance: int, verbose: bool) -> str:
+    """格式化成员查询的可读输出；详细模式只显示索引中唯一确认的资料。"""
+    inherited = "" if inheritance_distance == 0 else f" | 继承 {inheritance_distance}"
+    text = f"{row['kind']} | 声明于 {row['owner']}{inherited} | {row['declaration']} | {gav} | {row['source_path']}:{row['source_line']}"
+    if not verbose:
+        return text
+    details = []
+    if row["javadoc_path"]:
+        details.append(f"  Javadoc 页面：{row['javadoc_path']}")
+    if row["documentation"]:
+        details.append(f"  摘要：{row['documentation']}")
+    return text if not details else text + "\n" + "\n".join(details)
+
+
 def command_members(arguments: argparse.Namespace) -> int:
     connection = load_database(arguments)
     try:
@@ -1334,8 +1668,7 @@ def command_members(arguments: argparse.Namespace) -> int:
         for row in rows:
             gav = f"{row['group_name']}:{row['artifact_name']}:{row['version']}" if row['group_name'] else "未知构件"
             distance = visible.get(row["owner"], 0) if visible else 0
-            inherited = "" if distance == 0 else f" | 继承 {distance}"
-            item = {"kind": row["kind"], "owner": row["owner"], "declaration": row["declaration"], "artifact": gav, "source": row["source_path"], "line": row["source_line"], "inheritanceDistance": distance, "text": f"{row['kind']} | 声明于 {row['owner']}{inherited} | {row['declaration']} | {gav} | {row['source_path']}:{row['source_line']}"}
+            item = {"kind": row["kind"], "owner": row["owner"], "declaration": row["declaration"], "artifact": gav, "source": row["source_path"], "line": row["source_line"], "inheritanceDistance": distance, "text": member_text(row, gav, distance, arguments.verbose)}
             if arguments.verbose:
                 item["documentation"] = row["documentation"]
                 item["javadoc"] = row["javadoc_path"]
