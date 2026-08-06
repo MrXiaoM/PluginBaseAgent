@@ -34,8 +34,8 @@ from common.evidence import (  # noqa: E402
 
 PROJECT_ROOT = SCRIPT_ROOT.parent
 STATE_ROOT = PROJECT_ROOT / "state"
-INDEX_SCHEMA_VERSION = 7
-TOOL_VERSION = "7"
+INDEX_SCHEMA_VERSION = 8
+TOOL_VERSION = "8"
 DEFAULT_LIMIT = 8
 MAX_LIMIT = 100
 CLASS_INSERT_BATCH_SIZE = 2_000
@@ -762,6 +762,91 @@ def java_public_declarations(lines: list[str], package: str, imports: dict[str, 
     return records
 
 
+PRIMITIVE_TYPES = {"boolean", "byte", "char", "short", "int", "long", "float", "double", "void"}
+
+
+def split_signature_parameters(value: str) -> list[str]:
+    """按泛型嵌套深度分割参数，避免把 Map<K, V> 误切成两个参数。"""
+    result: list[str] = []
+    start = depth = 0
+    for index, character in enumerate(value):
+        if character == "<":
+            depth += 1
+        elif character == ">":
+            depth = max(0, depth - 1)
+        elif character == "," and not depth:
+            result.append(value[start:index].strip())
+            start = index + 1
+    final = value[start:].strip()
+    if final:
+        result.append(final)
+    return result
+
+
+def signature_type(value: str, has_parameter_name: bool = False) -> str:
+    """把 Java 文本类型缩减为可跨重定位安全比较的结构形状。"""
+    value = re.sub(r"@\w+(?:\([^)]*\))?\s*", "", value).strip()
+    value = re.sub(r"\b(?:final|volatile|transient)\b\s*", "", value).strip()
+    if has_parameter_name:
+        parts = re.split(r"\s+", value)
+        if len(parts) > 1:
+            value = " ".join(parts[:-1])
+    value = value.replace("...", "[]")
+    dimensions = value.count("[]")
+    value = value.replace("[]", "")
+    while "<" in value and ">" in value:
+        simplified = re.sub(r"<[^<>]*>", "", value)
+        if simplified == value:
+            break
+        value = simplified
+    value = re.sub(r"\?\s*(?:extends|super)\s+", "", value).strip()
+    value = value.rsplit(".", 1)[-1].strip()
+    if value in PRIMITIVE_TYPES:
+        return f"primitive:{value}:{dimensions}"
+    if re.fullmatch(r"[A-Z]", value):
+        return f"reference:*:{dimensions}"
+    return f"reference:{value}:{dimensions}"
+
+
+def declaration_signature(record: dict[str, Any]) -> tuple[str, str, tuple[str, ...], str | None]:
+    """返回 kind、名称、参数类型形状及字段/方法返回类型形状。"""
+    kind, name, declaration = str(record["kind"]), str(record["name"]), str(record["declaration"])
+    if kind in {"method", "constructor"}:
+        match = re.search(r"\((.*)\)", declaration)
+        parameters = tuple(signature_type(value, has_parameter_name=" " in value.strip()) for value in split_signature_parameters(match.group(1) if match else ""))
+        if kind == "constructor":
+            return kind, name, parameters, None
+        prefix = declaration[:match.start()] if match else declaration
+        prefix = re.sub(r"\b(?:public|protected|private|static|final|abstract|synchronized|default|native|strictfp)\b\s*", "", prefix)
+        return_type = prefix.rsplit(name, 1)[0].strip().split()[-1] if name in prefix and prefix.rsplit(name, 1)[0].strip() else ""
+        return kind, name, parameters, signature_type(return_type)
+    if kind == "field":
+        prefix = declaration.rsplit(name, 1)[0]
+        prefix = re.sub(r"\b(?:public|protected|private|static|final|volatile|transient)\b\s*", "", prefix).strip()
+        return kind, name, (), signature_type(prefix.split()[-1] if prefix else "")
+    return kind, name, (), None
+
+
+def types_compatible(left: str | None, right: str | None) -> bool:
+    if left is None or right is None or left == right:
+        return left == right
+    left_kind, left_name, left_dimensions = left.split(":", 2)
+    right_kind, right_name, right_dimensions = right.split(":", 2)
+    if left_kind != right_kind or left_dimensions != right_dimensions:
+        return False
+    return left_kind == "reference" and (left_name == "*" or right_name == "*" or left_name == right_name)
+
+
+def members_compatible(runtime: dict[str, Any], candidate: dict[str, Any], check_result: bool = True) -> bool:
+    runtime_kind, runtime_name, runtime_parameters, runtime_result = declaration_signature(runtime)
+    candidate_kind, candidate_name, candidate_parameters, candidate_result = declaration_signature(candidate)
+    if (runtime_kind, runtime_name) != (candidate_kind, candidate_name) or len(runtime_parameters) != len(candidate_parameters):
+        return False
+    if not all(types_compatible(left, right) for left, right in zip(runtime_parameters, candidate_parameters)):
+        return False
+    return not check_result or types_compatible(runtime_result, candidate_result)
+
+
 def html_text(value: str) -> str:
     value = re.sub(r"<script\b[^>]*>.*?</script>|<style\b[^>]*>.*?</style>", "", value, flags=re.IGNORECASE | re.DOTALL)
     return compact_text(re.sub(r"\s+", " ", re.sub(r"<[^>]+>", " ", value)).strip(), 420)
@@ -793,49 +878,127 @@ def add_javadoc_summaries(records: list[dict[str, Any]], source: zipfile.ZipFile
             continue
         blocks = re.findall(r'<div class="block">(.*?)</div>', document, flags=re.IGNORECASE | re.DOTALL)
         summary = html_text(blocks[0]) if blocks else ""
-        member_summaries = javadoc_member_summaries(document, {str(record["name"]) for record in owner_records if record["kind"] != "type"})
         for record in owner_records:
             record["javadoc"] = path
             if record["kind"] == "type":
                 record["documentation"] = summary or None
                 continue
-            record["documentation"] = member_summaries.get(str(record["name"])) or None
-
-
-def iter_public_api(source_archive: Path, javadoc_archive: Path | None, progress_prefix: str) -> Iterator[dict[str, Any]]:
-    """顺序读取归档；每次只保留一个 Java 文件及其对应类型页面。"""
-    try:
-        with zipfile.ZipFile(source_archive) as sources:
-            java_count = sum(1 for info in sources.infolist() if not info.is_dir() and info.filename.endswith(".java"))
-            javadocs = zipfile.ZipFile(javadoc_archive) if javadoc_archive else None
-            processed = 0
-            try:
-                for info in sources.infolist():
-                    if info.is_dir() or not info.filename.endswith(".java"):
+            anchors = []
+            for match in re.finditer(r'id="([^"]+)"', document, flags=re.IGNORECASE):
+                identifier = match.group(1)
+                name = re.split(r"[(:]", identifier, maxsplit=1)[0]
+                if name != record["name"]:
+                    continue
+                if "(" in identifier:
+                    parameters = identifier.split("(", 1)[1].rsplit(")", 1)[0]
+                    candidate = {"kind": record["kind"], "name": record["name"], "declaration": f"public void {record['name']}({parameters})"}
+                    if not members_compatible(record, candidate, check_result=False):
                         continue
-                    processed += 1
-                    if processed == 1 or processed % 200 == 0 or processed == java_count:
-                        print(f"{progress_prefix}公开 API 文件 {processed}/{java_count}", flush=True)
-                    lines = sources.read(info).decode("utf-8", errors="replace").splitlines()
-                    package = ""
-                    imports: dict[str, str] = {}
-                    for line in lines[:200]:
-                        found = re.match(r"\s*package\s+([\w.]+)\s*;", line)
-                        if found:
-                            package = found.group(1)
-                        imported = re.match(r"\s*import\s+(?:static\s+)?([\w.]+)\s*;", line)
-                        if imported and not imported.group(1).endswith(".*"):
-                            qualified = imported.group(1)
-                            imports[qualified.rsplit(".", 1)[-1]] = qualified
-                    records = java_public_declarations(lines, package, imports, info.filename)
-                    if javadocs and records:
-                        add_javadoc_summaries(records, javadocs)
-                    yield from records
-            finally:
-                if javadocs:
-                    javadocs.close()
+                elif record["kind"] != "field":
+                    continue
+                block = re.search(r'<div class="block">(.*?)</div>', document[match.end():], flags=re.IGNORECASE | re.DOTALL)
+                if block:
+                    anchors.append(html_text(block.group(1)))
+            record["documentation"] = anchors[0] if len(anchors) == 1 else None
+
+
+class SourceApiLookup:
+    """惰性读取资料归档，只为最终二进制类补全可唯一确认的文档。"""
+
+    def __init__(self, source_archive: Path | None, javadoc_archive: Path | None):
+        self.sources = zipfile.ZipFile(source_archive) if source_archive else None
+        self.javadocs = zipfile.ZipFile(javadoc_archive) if javadoc_archive else None
+        self.by_path: dict[str, zipfile.ZipInfo] = {}
+        self.by_simple_name: dict[str, list[zipfile.ZipInfo]] = {}
+        self.cache: dict[str, list[dict[str, Any]]] = {}
+        if self.sources:
+            for entry in self.sources.infolist():
+                if entry.is_dir() or not entry.filename.endswith(".java"):
+                    continue
+                self.by_path[entry.filename] = entry
+                self.by_simple_name.setdefault(Path(entry.filename).stem, []).append(entry)
+
+    def close(self) -> None:
+        if self.javadocs:
+            self.javadocs.close()
+        if self.sources:
+            self.sources.close()
+
+    def records(self, entry: zipfile.ZipInfo) -> list[dict[str, Any]]:
+        cached = self.cache.get(entry.filename)
+        if cached is not None:
+            return cached
+        lines = self.sources.read(entry).decode("utf-8", errors="replace").splitlines() if self.sources else []
+        package, imports = "", {}
+        for line in lines[:200]:
+            found = re.match(r"\s*package\s+([\w.]+)\s*;", line)
+            if found:
+                package = found.group(1)
+            imported = re.match(r"\s*import\s+(?:static\s+)?([\w.]+)\s*;", line)
+            if imported and not imported.group(1).endswith(".*"):
+                qualified = imported.group(1)
+                imports[qualified.rsplit(".", 1)[-1]] = qualified
+        records = java_public_declarations(lines, package, imports, entry.filename)
+        if self.javadocs and records:
+            add_javadoc_summaries(records, self.javadocs)
+        if len(self.cache) >= 256:
+            self.cache.pop(next(iter(self.cache)))
+        self.cache[entry.filename] = records
+        return records
+
+    def enrich(self, runtime_records: list[dict[str, Any]]) -> None:
+        if not self.sources or not runtime_records:
+            return
+        owner = str(runtime_records[0]["owner"])
+        entry = self.by_path.get(owner.replace(".", "/") + ".java")
+        if not entry:
+            candidates = self.by_simple_name.get(owner.rsplit(".", 1)[-1], [])
+            if len(candidates) != 1:
+                return
+            entry = candidates[0]
+        candidates = self.records(entry)
+        source_types = [record for record in candidates if record["kind"] == "type" and record["name"] == owner.rsplit(".", 1)[-1]]
+        if len(source_types) != 1:
+            return
+        source_type = source_types[0]
+        source_members = [record for record in candidates if record["owner"] == source_type["owner"] and record["kind"] != "type"]
+        for runtime in runtime_records:
+            if runtime["kind"] == "type":
+                runtime["source"] = source_type["source"]
+                runtime["line"] = source_type["line"]
+                runtime["javadoc"] = source_type["javadoc"]
+                runtime["documentation"] = source_type["documentation"]
+                continue
+            matches = [candidate for candidate in source_members if candidate["documentation"] and members_compatible(runtime, candidate)]
+            if len(matches) == 1:
+                runtime["source"] = matches[0]["source"]
+                runtime["line"] = matches[0]["line"]
+                runtime["javadoc"] = matches[0]["javadoc"]
+                runtime["documentation"] = matches[0]["documentation"]
+
+
+def iter_runtime_api(archive: Path, source_archive: Path | None, javadoc_archive: Path | None, progress_prefix: str) -> Iterator[dict[str, Any]]:
+    """运行 JAR 字节码决定签名；sources/Javadoc 只按唯一结构匹配补全文档。"""
+    lookup: SourceApiLookup | None = None
+    try:
+        lookup = SourceApiLookup(source_archive, javadoc_archive)
+        with zipfile.ZipFile(archive) as binary:
+            entries = [entry for entry in binary.infolist() if is_indexable_class_entry(entry)]
+            total = len(entries)
+            if not total:
+                print(f"{progress_prefix}字节码结构 0/0", flush=True)
+                return
+            for processed, entry in enumerate(entries, start=1):
+                if processed == 1 or processed % 200 == 0 or processed == total:
+                    print(f"{progress_prefix}字节码结构 {processed}/{total}", flush=True)
+                records = bytecode_member_records(binary.read(entry), entry.filename)
+                lookup.enrich(records)
+                yield from records
     except zipfile.BadZipFile:
-        return
+        print(f"{progress_prefix}字节码归档无效，已跳过", flush=True)
+    finally:
+        if lookup:
+            lookup.close()
 
 
 def open_database(path: Path, writable: bool = False) -> sqlite3.Connection:
@@ -930,19 +1093,16 @@ def insert_artifact(connection: sqlite3.Connection, raw: dict[str, Any], identif
     javadoc_reference = reference_archive(raw, "javadoc", hashes) if include_api else None
     sources_info = source_reference[1] if source_reference else None
     javadoc_info = javadoc_reference[1] if javadoc_reference else None
-    api_status = "not-requested" if not include_api else ("sources" if source_reference and javadoc_reference else "sources-only" if source_reference else "bytecode-with-javadoc" if javadoc_reference else "bytecode")
+    api_status = "not-requested" if not include_api else ("bytecode-with-sources-and-javadoc" if source_reference and javadoc_reference else "bytecode-with-sources" if source_reference else "bytecode-with-javadoc" if javadoc_reference else "bytecode")
     connection.execute("""
         INSERT INTO artifacts(id, group_name, artifact_name, version, classifier, extension, file_name, file_path, sha256, sources_sha256, sources_origin, sources_source, javadoc_sha256, javadoc_origin, javadoc_source, api_status)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     """, (identifier, *(coordinate or (None, None, None)), str(raw.get("classifier", "")), str(raw.get("extension", "")), path.name, str(path), artifact_sha256, *(sources_info[key] if sources_info else None for key in ("sha256", "origin", "source")), *(javadoc_info[key] if javadoc_info else None for key in ("sha256", "origin", "source")), api_status))
-    if source_reference:
-        source_archive, _ = source_reference
+    if include_api:
+        source_archive = source_reference[0] if source_reference else None
         javadoc_archive = javadoc_reference[0] if javadoc_reference else None
-        print(prefix + ("读取 sources 与 Javadoc 摘要" if javadoc_archive else "读取 sources"), flush=True)
-        insert_public_api(connection, iter_public_api(source_archive, javadoc_archive, prefix), identifier)
-    elif include_api:
-        print(prefix + "读取字节码结构", flush=True)
-        insert_public_api(connection, iter_bytecode_api(path, prefix), identifier)
+        print(prefix + ("以字节码签名关联 sources/Javadoc" if source_archive and javadoc_archive else "以字节码签名关联 sources" if source_archive else "读取字节码结构"), flush=True)
+        insert_public_api(connection, iter_runtime_api(path, source_archive, javadoc_archive, prefix), identifier)
 
 
 def remove_legacy_index_state(state_root: Path) -> None:
@@ -972,6 +1132,9 @@ def build_database(arguments: argparse.Namespace, database: Path) -> None:
     remove_legacy_index_state(state_root)
     temporary = database.with_suffix(database.suffix + ".tmp")
     temporary.unlink(missing_ok=True)
+    if database.is_file():
+        print(f"清理旧 SQLite 索引：{database}", flush=True)
+        database.unlink()
     connection = open_database(temporary, writable=True)
     try:
         create_schema(connection)
@@ -1056,11 +1219,11 @@ def command_sync(arguments: argparse.Namespace) -> int:
     connection = load_database(arguments)
     try:
         counts = {name: connection.execute(f"SELECT COUNT(*) FROM {name}").fetchone()[0] for name in ("modules", "configurations", "artifacts", "classes", "api")}
-        bytecode = connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status IN ('bytecode', 'bytecode-with-javadoc')").fetchone()[0]
+        without_sources = connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status NOT IN ('bytecode-with-sources', 'bytecode-with-sources-and-javadoc')").fetchone()[0]
         failed = connection.execute("SELECT COUNT(*) FROM configurations WHERE status != 'ok'").fetchone()[0]
     finally:
         connection.close()
-    print(f"已同步：模块 {counts['modules']}，配置 {counts['configurations']}，构件 {counts['artifacts']}，类 {counts['classes']}，公开签名 {counts['api']}，字节码回退 {bytecode}，失败 {failed}")
+    print(f"已同步：模块 {counts['modules']}，配置 {counts['configurations']}，构件 {counts['artifacts']}，类 {counts['classes']}，公开签名 {counts['api']}（均来自运行字节码），缺少 sources 资料 {without_sources}，失败 {failed}")
     return 0
 
 
@@ -1068,10 +1231,10 @@ def command_status(arguments: argparse.Namespace) -> int:
     connection = load_database(arguments)
     try:
         reason = stale_reason(connection, normalize_project(arguments.project))
-        data = {"status": "stale" if reason else "ready", "reason": reason, "modules": connection.execute("SELECT COUNT(*) FROM modules").fetchone()[0], "artifacts": connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0], "classes": connection.execute("SELECT COUNT(*) FROM classes").fetchone()[0], "members": connection.execute("SELECT COUNT(*) FROM api").fetchone()[0], "withoutSources": connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status NOT IN ('sources', 'sources-only')").fetchone()[0], "bytecodeFallback": connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status IN ('bytecode', 'bytecode-with-javadoc')").fetchone()[0]}
+        data = {"status": "stale" if reason else "ready", "reason": reason, "modules": connection.execute("SELECT COUNT(*) FROM modules").fetchone()[0], "artifacts": connection.execute("SELECT COUNT(*) FROM artifacts").fetchone()[0], "classes": connection.execute("SELECT COUNT(*) FROM classes").fetchone()[0], "members": connection.execute("SELECT COUNT(*) FROM api").fetchone()[0], "withoutSources": connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status NOT IN ('bytecode-with-sources', 'bytecode-with-sources-and-javadoc')").fetchone()[0], "binarySignatures": connection.execute("SELECT COUNT(*) FROM artifacts WHERE api_status != 'not-requested'").fetchone()[0]}
     finally:
         connection.close()
-    print(json.dumps(data, ensure_ascii=False, separators=(",", ":")) if arguments.json else f"SQLite 索引 {data['status']}：模块 {data['modules']}，构件 {data['artifacts']}，类 {data['classes']}，公开签名 {data['members']}，无源码资料 {data['withoutSources']}，字节码回退 {data['bytecodeFallback']}{'；' + reason if reason else ''}")
+    print(json.dumps(data, ensure_ascii=False, separators=(",", ":")) if arguments.json else f"SQLite 索引 {data['status']}：模块 {data['modules']}，构件 {data['artifacts']}，类 {data['classes']}，公开签名 {data['members']}（运行字节码），无 sources 资料 {data['withoutSources']}{'；' + reason if reason else ''}")
     return 1 if reason else 0
 
 
