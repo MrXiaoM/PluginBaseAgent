@@ -15,7 +15,7 @@ skill/
 ```
 
 - `SKILL.md`：稳定、简短的 Agent 入口和强制工作流。
-- `assets/agent-dev-kit.zip`：从当前项目根目录的 `README.md`、`QUICKSTART.md`、`docs/`、`tools/`、`registry/`、`.gitignore` 和 `state/README.md` 构建的项目内开发包。
+- `assets/agent-dev-kit.zip`：从当前项目根目录的 `README.md`、`QUICKSTART.md`、`docs/`、`tools/`、`.gitignore` 和 `state/README.md` 构建的项目内开发包。
 - `scripts/install_kit.py`：Skill 安装后，将资源 ZIP 安全释放为目标插件项目的 `agent-dev/`。
 
 资源 ZIP 是由当前项目文档真源生成的构建产物，不在 `assets/` 维护第二份可编辑文档。不要手工修改 ZIP 内文件；应修改当前项目根目录的真源后重新构建。
@@ -28,7 +28,7 @@ skill/
 python scripts/build_skill_package.py
 ```
 
-该命令重新生成 `skill/minecraft-pluginbase-development/assets/agent-dev-kit.zip`，并排除 `state/` 中的下载、解包资料、索引、查询记录以及 Python 字节码。ZIP 中的 `manifest.json` 记录每个资源文件的 `SHA-256`，供追溯当前构建内容。
+该命令重新生成 `skill/minecraft-pluginbase-development/assets/agent-dev-kit.zip`，并排除 `state/` 中的本机 Gradle 环境、可重建索引、依赖笔记以及 Python 字节码。ZIP 中的 `manifest.json` 记录每个资源文件的 `SHA-256`，供追溯当前构建内容。
 
 预览将包含的文件：
 
@@ -61,9 +61,8 @@ python <该工具的项目级 Skill 路径>/scripts/install_kit.py --project .
   QUICKSTART.md
   docs/
   tools/
-  registry/
   state/README.md
   manifest.json
 ```
 
-默认不会覆盖已有的 `agent-dev/` 文件。用户明确要求升级或重置时才加 `--force`；可先使用 `--dry-run` 预览。`agent-dev/state/` 是本地资料缓存，必须保持在版本控制和插件 JAR 之外。
+默认不会覆盖已有的 `agent-dev/` 文件。用户明确要求升级或重置时才加 `--force`；可先使用 `--dry-run` 预览。`agent-dev/state/` 保存本机 Gradle 环境、可重建索引和依赖笔记，必须保持在版本控制和插件 JAR 之外。

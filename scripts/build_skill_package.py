@@ -21,7 +21,6 @@ KIT_SOURCES = (
     Path(".gitignore"),
     Path("docs"),
     Path("tools"),
-    Path("registry"),
     Path("state/README.md"),
 )
 EXCLUDED_PARTS = {"__pycache__", ".git", "state"}

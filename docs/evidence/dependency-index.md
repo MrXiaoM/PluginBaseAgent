@@ -36,7 +36,7 @@ SQLite 索引属于 `agent-dev/state/`，不提交、不分发、不参与插件
 
 ## 查询规则
 
-具体 Zoo 参数映射见 `dependency-index-zoo-tool.md`，无 Zoo 时的 CLI 示例见 `dependency-index-cli.md`。默认结果最多 `8` 条：类查询显示类名与 GAV；成员查询显示公开声明、所属类型、GAV 与 source 位置；依赖查询默认只显示实际构件。需要更多结果时使用通道对应的 `limit`/`--limit`、`offset`/`--offset`，需要来源、哈希和本机路径时使用 CLI `--verbose`。无索引、索引过期、解析失败或资料不足都会输出短错误，不输出堆栈；这些结果本身不授权同步。
+具体 Zoo 参数映射见 `dependency-index-zoo-tool.md`，无 Zoo 时的 CLI 示例见 `dependency-index-cli.md`。默认结果最多 `8` 条：类查询显示类名与 GAV；成员查询显示公开声明、所属类型、GAV 与 source 位置；依赖查询默认只显示实际构件。需要更多结果时使用通道对应的 `limit`/`--limit`、`offset`/`--offset`。需要来源、哈希和主 JAR、sources/Javadoc 本机路径时，对 `show` 使用 Zoo `verbose: true`，或 CLI `--verbose`。无索引、索引过期、解析失败或资料不足都会输出短错误，不输出堆栈；这些结果本身不授权同步。
 
 `classes` 和未限定的 `members` 是不区分大小写的模糊搜索。已知接收者类型时，使用 `members <成员关键词> --type <完整或简单类型名>`；索引会沿已记录的 `extends`/`implements` 链搜索该类型可见成员，并明确输出“声明于 <父类型> | 继承 N”。例如 `PlayerInventory` 可见的 `addItem` 实际声明于 `Inventory`。关系来自 sources 类型声明或字节码直接父类/接口；遇到无法解析、未索引或歧义的父类型时不会猜测。
 
@@ -44,6 +44,6 @@ SQLite 索引属于 `agent-dev/state/`，不提交、不分发、不参与插件
 
 ## Zoo Code 适配器
 
-从项目 `.roo/skills/minecraft-pluginbase-development/` 运行初始化脚本时，安装器自动创建 `./.roo/tools/pluginbase-dependency-index.js`，并在同目录自动安装 Zoo 参数校验所需的 `zod@3.25.76`。Zoo 对 `.js` 工具直接加载，避免项目工具经 esbuild 打包时解析不到扩展内部 `@roo-code/types`；模板导出普通工具对象与真实 Zod schema，限定固定索引查询动作，不接受任意命令，返回受限大小的字符串 JSON。已有同名 `.js` 工具始终保留，不自动覆盖。
+从项目 `.roo/skills/minecraft-pluginbase-development/` 运行初始化脚本时，安装器自动创建 `./.roo/tools/pluginbase-dependency-index.js`，并在同目录自动安装 Zoo 参数校验所需的 `zod@3.25.76`。Zoo 对 `.js` 工具直接加载，避免项目工具经 esbuild 打包时解析不到扩展内部 `@roo-code/types`；模板导出普通工具对象与真实 Zod schema，限定固定索引查询动作，不接受任意命令，返回受限大小的字符串 JSON。`show` 的 `verbose: true` 仅转发索引 CLI 的 `--verbose`，返回数据库已记录的主 JAR、sources/Javadoc 路径与哈希，不扫描缓存、不联网、不触发同步。已有同名 `.js` 工具始终保留，不自动覆盖。
 
 Zoo Code Custom Tools 是实验性功能，启用后自动批准工具执行。用户只需在 Zoo Code 的 Experimental 设置启用 Custom Tools，并在工具变更后执行 `Refresh Custom Tools` 或重载窗口。工具已加载的会话必须遵循 `dependency-index-zoo-tool.md`，不得改用 CLI 查询。核心 CLI 不依赖 Zoo；`install-zoo` 子命令仅用于非 `.roo/skills/` 安装路径的维护或修复。

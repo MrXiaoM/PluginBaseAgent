@@ -10,7 +10,7 @@
 ## 通用接入流程
 
 1. 从目标项目的 `build.gradle.kts` 读取并锁定实际 GAV；不以本向导中的示例版本替代项目声明。
-2. 在 Maven Central 和目标版本的 `sources.jar`、`javadoc.jar` 中确认依赖、传递依赖、许可证、公开类型和计划调用的精确签名。`registry/artifacts.json` 只记录资料来源策略，不是版本管理器，也不会替代项目的依赖声明。
+2. 按 `../evidence/dependency-index-zoo-tool.md` 或 `../evidence/dependency-index-cli.md` 从项目实际 Gradle 解析结果确认依赖、传递依赖、公开签名与哈希；需要完整资料时按 `../evidence/query-playbook.md` 直接读取目标版本的 `sources.jar`、Javadoc 或临时反编译实现。
 3. 判断依赖范围：插件运行时直接调用且服务端不提供时通常使用 `implementation`；仅编译外部插件 API 时使用 `compileOnly`，并在 `plugin.yml` 维护 `depend` 或 `softdepend`。不要把这两个场景混淆。
 4. 对会进入 Shadow JAR 的实现依赖，按项目私有 `shadowGroup` 重定位其 Java 包；同时检查服务描述、配置、反射字符串、序列化类型名和资源路径。不得把 Spigot/Paper API 打入 JAR。
 5. 将第三方库调用集中在业务适配层或 `depend/`、`manager/` 等职责明确的类中；不让其类型无边界传播到命令、配置和持久化模型。
@@ -20,8 +20,8 @@
 ## 版本与资料边界
 
 - `ItemPacketModifier` 与 `EvalEx-j8` 均按 Maven Central 构件处理；仓库配置应优先使用 `mavenCentral()`，不额外加入来源不明的仓库。
-- 版本、包名、方法签名、线程安全性、传递依赖和许可证都以项目锁定版本的官方 POM、sources/Javadoc 为准。无法取得资料时，停止添加或调用未证明的类型。
-- 本资料包的 `api_evidence.py` 只处理 Spigot/Paper；查询这些通用依赖时，按 `../evidence/query-playbook.md` 的人工查询流程复用 Gradle 缓存或 Maven Central 归档，并写入证据记录。
+- 版本、包名、方法签名、线程安全性、传递依赖和许可证都以项目锁定版本的实际 Gradle 解析、运行 JAR 字节码、官方 POM、sources/Javadoc 为准。无法取得资料时，停止添加或调用未证明的类型。
+- 查询这些通用依赖时，按 `../evidence/query-playbook.md` 通过依赖索引定位 GAV、运行签名和资料路径；sources 存在时直接读取，缺少 sources 才临时反编译，并按证据格式记录结论。
 - 不把第三方库的业务输入视为可信：客户端数据、物品、配置公式、变量值和管理员可编辑文本都必须在项目边界验证。
 
 ## 打包与运行期审查

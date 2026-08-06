@@ -6,7 +6,7 @@
 
 | 文件 | 解决的问题 |
 | --- | --- |
-| `00-layout-and-usage.md` | 文档包如何复制到项目、哪些目录可写/可提交、工具和缓存应放在哪里。 |
+| `00-layout-and-usage.md` | 文档包如何复制到项目、哪些目录可写/可提交、工具、可重建索引和本地笔记应放在哪里。 |
 | `01-agent-contract.md` | Agent 的强制约束：默认 Spigot、先取证、不猜测、生命周期与最低验证。 |
 | `02-development-workflow.md` | 从需求、证据、设计到构建和交付的完整执行顺序。 |
 | `03-template-contract.md` | `template-site` 生成项目的构建、模块、依赖、资源和 Shadow 基线。 |
@@ -55,10 +55,11 @@
 | --- | --- |
 | `evidence/evidence-policy.md` | 哪些结论必须取证、可接受来源、精确版本和停止条件。 |
 | `evidence/evidence-record-format.md` | 记录接口或框架结论的标准模板。 |
-| `evidence/query-playbook.md` | 资料同步、缓存、人工查询与当前工具命令协议。 |
+| `evidence/query-playbook.md` | 索引定位、sources 直接阅读和临时 Vineflower 反编译规程。 |
 | `evidence/dependency-index.md` | 按 Gradle 模块建立依赖、类、公开 API 与继承关系索引的存储、取证与重建边界。 |
 | `evidence/dependency-index-zoo-tool.md` | Zoo 工具已加载时的强制依赖索引查询规则与参数映射。 |
 | `evidence/dependency-index-cli.md` | 未提供 Zoo 工具时的 CLI 查询规则与受限同步条件。 |
+| `evidence/dependency-notes.md` | `state/notes/` 中本机依赖使用习惯与已验证边界的维护规则。 |
 
 ## 质量与维护
 
@@ -68,8 +69,7 @@
 | `quality/review-checklist.md` | 功能修改的审查清单。 |
 | `quality/build-and-artifact-checklist.md` | Gradle、Shadow、JAR 和服务端启动验证清单。 |
 | `maintenance/update-policy.md` | PluginBase/API/模板/资料包的更新流程和失效规则。 |
-| `maintenance/source-registry.md` | 未来资料注册表的字段、下载和 Snapshot 校验契约。 |
-| `maintenance/distribution-boundary.md` | 分发内容、缓存、版权、Git 和未来 Skill 的边界。 |
+| `maintenance/distribution-boundary.md` | 分发内容、本机状态、版权、Git 和 Skill 的边界。 |
 
 ## 任务到文档的最短路径
 
@@ -85,7 +85,7 @@
 | 增加 Paper-only 功能 | `server-api/api-selection.md`、`server-api/paper-extension-rules.md`、`evidence/evidence-policy.md` |
 | 增加配置、数据库或动态库 | `pluginbase/configuration-database-and-libraries.md`、`quality/review-checklist.md` |
 | 修改构建、发布和依赖 | `03-template-contract.md`、`pluginbase/packaging-and-relocation.md`、`quality/build-and-artifact-checklist.md` |
-| 陌生 Gradle 依赖、类或成员 | `evidence/dependency-index.md`、`evidence/query-playbook.md`；已知接收者类型时沿继承关系查询成员。 |
+| 陌生 Gradle 依赖、类或成员 | `evidence/dependency-index.md`、`evidence/query-playbook.md`；已知接收者类型时沿继承关系查询成员，理解实现时优先读取 sources。 |
 | 用户给出陌生、前沿或非传统 Minecraft 版本号 | `server-api/minecraft-version-integrity.md`；保留原样版本并按 Wiki URL 核验，绝不自动改写。 |
 | 升级服务端/API/PluginBase | `server-api/version-compatibility.md`、`maintenance/update-policy.md`、`evidence/query-playbook.md` |
 | 想使用 NMS 或反射 | `server-api/nms-boundary.md`；未获明确许可时停止。 |

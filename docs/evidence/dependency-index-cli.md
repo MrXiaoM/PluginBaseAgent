@@ -21,16 +21,16 @@ python agent-dev/tools/dependency_index.py dependencies --project . --module :fe
 python agent-dev/tools/dependency_index.py classes --project . ItemStack
 python agent-dev/tools/dependency_index.py members --project . getDisplayName
 python agent-dev/tools/dependency_index.py members --project . addItem --type PlayerInventory
-python agent-dev/tools/dependency_index.py show --project . --artifact top.mrxiaom:EvalEx-j8
+python agent-dev/tools/dependency_index.py show --project . --artifact top.mrxiaom:EvalEx-j8 --verbose
 ```
 
-默认最多输出 `8` 条。需要更多匹配时使用 `--limit`、`--offset`；需要本机归档路径、哈希和来源时使用 `--verbose`；自动化调用使用 `--json`。
+默认最多输出 `8` 条。需要更多匹配时使用 `--limit`、`--offset`；对 `show` 使用 `--verbose` 取得本机主 JAR、sources/Javadoc 路径与哈希。随后按 `query-playbook.md` 优先直接读取 sources；sources 缺失时才临时 Vineflower 反编译主 JAR。自动化调用使用 `--json`。
 
 ## 推荐顺序
 
 1. 用 `classes` 找到陌生库的实际类与 GAV。
 2. 用 `members` 查方法、字段、构造器或类型；已知接收者类型时必须加 `--type`，使索引沿继承链报告真实声明处。
-3. 用 `show` 和 `dependencies` 核对构件、解析来源或传递依赖。
+3. 用 `show` 和 `dependencies` 核对构件、解析来源或传递依赖；需要实现细节时对 `show` 使用 `--verbose`，再按 `query-playbook.md` 检查目标源码。
 4. 结果不足时，停止猜测；不要以 `javap` 反复试探，也不要自动同步。
 
 ## 允许同步的唯一常规场景

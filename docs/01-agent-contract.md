@@ -14,7 +14,8 @@
 6. `LibrariesResolver-Gradle` 的精确版本是全部 PluginBase 模块的统一版本锚点；只从 `pluginBaseModules` 识别实际启用模块，并以该统一版本同步其资料，不得为未启用模块逐个猜测或探测版本。
 7. 功能是否需要配置、数据库、GUI、Action、命令、富文本、调度、BungeeCord、动态库、外部插件兼容或嵌入式外部依赖。
 8. 若使用 `ItemPacketModifier` 或 `EvalEx-j8`，从项目锁定的 Maven Central GAV 取得 POM、sources/Javadoc，核对实际包名、公开签名、传递依赖、许可证、重定位与运行期线程边界；不得用本资料包示例版本替代项目版本。
-9. 遇到陌生 Gradle 依赖时，先检查 `agent-dev/state/indexes/dependency-index.sqlite3` 的新鲜状态；需要时用 `dependency_index.py sync` 取得真实解析依赖。该索引用 SQLite/FTS 按需查询，不复制或解包完整 sources/Javadoc；已知接收者类型时，用类型限定成员搜索沿 `extends`/`implements` 链定位实际声明，不能因实现类型本身未声明成员就误判 API 不存在。
+9. 涉及已有依赖、PluginBase 模块、服务端 API 或 Shadow 重定位时，先读取相关 `agent-dev/state/notes/*.md`；只采用已验证笔记，版本、依赖或封装改变后立即使相应笔记失效。
+10. 遇到陌生 Gradle 依赖时，按 `evidence/dependency-index-zoo-tool.md` 或 `evidence/dependency-index-cli.md` 直接查询实际模块依赖、类、公开字节码签名和继承关系，不执行 `status` 预检。只有 Agent 已实际改变依赖集合或用户明确要求时才允许 `sync`；查询失败、索引过期和资料不足不能触发同步。已知接收者类型时，用类型限定成员搜索沿 `extends`/`implements` 链定位实际声明，不能因实现类型本身未声明成员就误判 API 不存在。
 
 若这些事实影响实现而无法从用户需求和当前项目中确定，先提出最少必要的问题；不得擅自选用 Paper 或 NMS。对陌生或前沿的用户版本号，可按 `server-api/minecraft-version-integrity.md` 使用 Wiki 原样 URL 核验，但不得改写该输入。
 
@@ -37,12 +38,12 @@
 - Paper 专用 API；
 - NMS、CraftBukkit 或反射目标；
 - `PluginBase` 的模块、Options、生命周期、自动注册、调度器、配置、物品栏和物品编辑行为；
-- 外部插件 API、可选依赖和嵌入式外部库的类名；优先用本地依赖索引定位实际 GAV、类、公开签名与继承声明，再复核归档；
+- 外部插件 API、可选依赖和嵌入式外部库的类名；优先用本地依赖索引定位实际 GAV、类、公开签名、继承声明和本机归档路径，再按 `evidence/query-playbook.md` 直接读取 sources，缺少 sources 时才临时反编译主 JAR；
 - 依赖坐标、传递依赖、重定位包名和产物资源路径；
 - `ItemPacketModifier` 的包回调线程、客户端回传还原与监听器释放；
 - `EvalEx-j8` 的表达式 API、可变实例/副本并发语义及数值精度策略。
 
-证据必须能说明**精确版本**、**来源类型**、**文件或锚点**与**实际签名/描述**。查询工具完成前，至少应保留这些信息到开发记录、改动说明或提交说明中。格式见 `evidence/evidence-record-format.md`。
+证据必须能说明**精确版本**、**来源类型**、**构件哈希**、**归档内文件或锚点**与**实际签名/描述**。运行签名以最终 JAR 字节码为准；sources/Javadoc 用于补充语义，Vineflower 临时反编译只能说明实现阅读来源。查询完成后，至少将证据保留在开发记录、改动说明或提交说明中；可复用的项目习惯按 `evidence/dependency-notes.md` 精简写入 `state/notes/`。格式见 `evidence/evidence-record-format.md`。
 
 ## 禁止猜测与停止条件
 

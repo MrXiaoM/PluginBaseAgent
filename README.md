@@ -4,9 +4,7 @@
 
 这是面向 Agent 的 Minecraft 服务端插件开发规范包，服务于使用 `PluginBase` 的 Gradle 插件项目。
 
-目标是让 Agent 在开发、修复、审查和升级插件时，能够依据项目内的文档与可复核资料完成工作：默认使用 Spigot API；仅在用户明确选择或已验证需要时使用 Paper API；在写出版本敏感代码前查询目标版本的源码或 Javadoc，而不是凭经验猜测接口。
-
-> 当前阶段：先交付文档。用于同步、解包、索引与查询 API 资料的工具，以及安装后的 Skill 入口，会在文档审阅完成后补充。
+目标是让 Agent 在开发、修复、审查和升级插件时，能够依据项目内的文档与可复核资料完成工作：默认使用 Spigot API；仅在用户明确选择或已验证需要时使用 Paper API；在写出版本敏感代码前先以实际运行 JAR 字节码和同版本资料核对，而不是凭经验猜测接口。
 
 ## 这份文档放在哪里
 
@@ -24,7 +22,7 @@
 
 `agent-dev/` 是插件项目的一部分，不依赖开发者本机的其它目录。Agent 应优先读取项目内 `agent-dev/` 的内容；不得假设存在本仓库调研时使用的本机 `PluginBase`、模板站点、示例插件或 Gradle 缓存路径。
 
-配套工具位于 `agent-dev/tools/`，本地下载的归档、解包资料、索引和查询记录位于 `agent-dev/state/`。`state/environment.json` 专门保存本项目机器的持久环境信息，例如实际 Gradle 缓存目录；它使 Agent 在上下文压缩、重新连接或交接后无需猜测或扫描默认 C 盘路径。`state/` 不应提交到插件的版本控制仓库；文档、注册表和工具应随项目提交，以固定该项目使用的开发规范版本。
+配套工具位于 `agent-dev/tools/`。`agent-dev/state/` 只保存 `environment.json`、可重建依赖索引和本地依赖使用笔记：`environment.json` 记录本机实际 Gradle 缓存目录，使 Agent 在上下文压缩、重新连接或交接后无需猜测或扫描默认 C 盘路径；第三方归档、解包资料与反编译输出不进入该目录。`state/` 不应提交到插件的版本控制仓库；文档和工具应随项目提交，以固定该项目使用的开发规范版本。
 
 ## 目录导航
 
@@ -41,8 +39,7 @@
 | `docs/evidence/` | API 资料查询与证据记录要求 | 使用版本敏感接口前 |
 | `docs/quality/` | 代码风格、评审清单、构建与产物检查 | 提交改动前 |
 | `docs/maintenance/` | 文档、工具、资料与依赖升级规则 | 升级版本或维护资料时 |
-| `tools/README.md` | Gradle 依赖索引、API/PluginBase 资料同步、查询、比较与项目静态验证命令 | 使用陌生依赖、版本敏感接口或提交构建改动前 |
-| `registry/` | Spigot/Paper、PluginBase 与已登记外部依赖的构件坐标、仓库和资料策略 | 排查资料下载或更新来源规则时 |
+| `tools/README.md` | Gradle 依赖索引、直接 sources 阅读、临时 Vineflower 反编译与项目静态验证命令 | 使用陌生依赖、版本敏感接口或提交构建改动前 |
 
 ## 推荐阅读顺序
 
@@ -51,8 +48,8 @@
 3. 阅读 `docs/00-layout-and-usage.md`，确认当前项目中资料包的位置和可写目录。
 4. 阅读 `docs/01-agent-contract.md`，确认目标 Minecraft 版本、服务器 API 与兼容边界。
 5. 根据任务读取 `docs/02-development-workflow.md` 和对应专题文档。
-6. 遇到陌生 Gradle 依赖时，按 `docs/evidence/dependency-index-zoo-tool.md` 或 `docs/evidence/dependency-index-cli.md` 选择唯一查询通道：Zoo 工具存在时只调用工具，不执行依赖索引 CLI；否则直接执行具体 CLI 查询，不做 `status` 预检。初始化器已建立首次索引；仅在 Agent 实际修改依赖集合或用户明确要求时才允许 `sync`。索引只负责定位，不替代 sources/Javadoc 复核。
-7. 使用 `tools/api_evidence.py` 或 `tools/pluginbase_evidence.py` 同步并查询目标版本资料，再实现版本敏感代码。
+6. 遇到陌生 Gradle 依赖时，按 `docs/evidence/dependency-index-zoo-tool.md` 或 `docs/evidence/dependency-index-cli.md` 选择唯一查询通道：Zoo 工具存在时只调用工具，不执行依赖索引 CLI；否则直接执行具体 CLI 查询，不做 `status` 预检。初始化器已建立首次索引；仅在 Agent 实际修改依赖集合或用户明确要求时才允许 `sync`。
+7. 以索引定位的运行字节码签名为准；需要实现细节时，按 `docs/evidence/query-playbook.md` 优先直接读取 `sources.jar`，没有 sources 才临时下载 Vineflower 反编译主 JAR。将可复用的已验证结论记入 `state/notes/`。
 8. 修改完成后按 `docs/quality/build-and-artifact-checklist.md` 执行构建与产物检查。
 
 ## 适用范围
@@ -65,7 +62,7 @@
 
 ## 不在本包中分发的内容
 
-本包不包含 Spigot、Paper、PluginBase 或其它第三方库的源码归档与 Javadoc 归档。它们体积大、版本会变动且受各自许可证约束。工具只会在当前插件项目的 `agent-dev/state/` 中按需复用 Gradle 缓存或下载、解包和查询这些资料。
+本包不包含 Spigot、Paper、PluginBase 或其它第三方库的源码归档与 Javadoc 归档。它们体积大、版本会变动且受各自许可证约束。目标项目 Gradle 管理实际构件；索引只记录本机路径与哈希，工具直接读取单个 sources 条目或在缺少 sources 时临时反编译，不复制或解包资料到 `agent-dev/state/`。
 
 ## 关键原则
 
@@ -77,7 +74,7 @@
 
 ## Skill 分发
 
-可安装的 Skill 位于 `skill/minecraft-pluginbase-development/`，它包含简短的 `SKILL.md`、安全释放脚本和由当前文档真源生成的 `assets/agent-dev-kit.zip`。分发与重建步骤见 `skill/README.md`：修改本项目文档、工具或注册表后，执行 `python scripts/build_skill_package.py` 重新生成资源包。
+可安装的 Skill 位于 `skill/minecraft-pluginbase-development/`，它包含简短的 `SKILL.md`、安全释放脚本和由当前文档真源生成的 `assets/agent-dev-kit.zip`。分发与重建步骤见 `skill/README.md`：修改本项目文档或工具后，执行 `python scripts/build_skill_package.py` 重新生成资源包。
 
 将整个 `minecraft-pluginbase-development/` 目录安装到目标插件项目中所用 AI 开发工具的**项目级 Skill 目录**；目录内的 `SKILL.md` 必须保持在对应目录根部：
 

@@ -21,18 +21,11 @@
 
 1. 从 `top.mrxiaom:LibrariesResolver-Gradle` 取得 PluginBase 的统一精确版本。
 2. 确认 `pluginBaseModules` 已包含 `gui`；同时确认是否需要 `paper` 提供 Spigot/Paper 双端库存工厂回退。
-3. 同步并查询实际项目版本的 GUI 源码/Javadoc：
-
-   ```text
-   python agent-dev/tools/pluginbase_evidence.py sync --version <统一版本> --module gui
-   python agent-dev/tools/pluginbase_evidence.py query --version <统一版本> --module gui --symbol IGuiHolder
-   python agent-dev/tools/pluginbase_evidence.py query --version <统一版本> --module gui --symbol GuiManager
-   ```
-
-4. 若菜单会使用 `ItemEditor`、`InventoryFactory`、物品 NBT、Action 或语言消息，按实际使用模块继续同步资料；不要因 `gui` 已引入就假定这些能力存在。
+3. 按 `../evidence/dependency-index-zoo-tool.md` 或 `../evidence/dependency-index-cli.md` 查询项目实际解析的 GUI 构件，定位 `IGuiHolder`、`GuiManager` 和计划调用的成员；需要完整实现语义时，再按 `../evidence/query-playbook.md` 直接读取其 `sources.jar`。
+4. 若菜单会使用 `ItemEditor`、`InventoryFactory`、物品 NBT、Action 或语言消息，确认实际已解析的对应模块构件；不要因 `gui` 已引入就假定这些能力存在。
 5. 阅读目标项目已有的 Holder、菜单和 `plugin.yml`。框架源码证明能力边界，不是可直接复制的完整业务菜单示例。
 
-若 `gui` 模块没有同步成功，或查不到计划调用的符号，不得根据其它版本、其它插件或记忆猜测签名。
+若找不到实际解析的 `gui` 构件或计划调用的符号，不得根据其它版本、其它插件或记忆猜测签名；查询失败本身不允许自动同步。
 
 ## 框架职责与每玩家实例
 
@@ -46,7 +39,7 @@
 - `GuiManager` 已统一转发 `InventoryClickEvent`、`InventoryDragEvent`、`InventoryCloseEvent` 和 `PlayerQuitEvent`。菜单仍必须实现自身的状态清理、事务取消和异步结果失效策略。
 - 只根据框架传入的顶层 `InventoryViewAccessor` 和 slot 判断菜单操作；不能因玩家当前打开任意容器就处理事件。
 
-已同步的当前版本 GUI 模块资料中的 `GuiManager`、`IGuiHolder` 是生命周期和事件路由的依据；项目具体的库存创建、标题处理和兼容工厂仍以当前版本资料与项目已有基线为准。
+当前项目实际解析的 GUI 构件中 `GuiManager`、`IGuiHolder` 的字节码签名与同版本资料是生命周期和事件路由的依据；项目具体的库存创建、标题处理和兼容工厂仍以当前版本资料与项目已有基线为准。
 
 ## 推荐结构
 
@@ -97,7 +90,7 @@ src/main/java/<主包名>/
 
 - 对不使用 Adventure 的既有项目、原始颜色文本，或发光、模型数据、物品模型等辅助操作，使用 `ItemStackUtil` 的已验证方法，例如 `setItemDisplayName(...)`、`setItemLore(...)`、`setGlow(...)`、`setCustomModelData(...)` 与 `setItemModel(...)`；不要因方便直接散落 `ItemMeta` 操作。
 - 图标需要保留或附加物品自定义数据时，构建脚本已安装 `item-nbt-api` 就使用该依赖；不得改用 `PersistentDataContainer` 作为同一用途的替代方案。
-- `Material`、自定义模型、物品模型和具体工具方法都必须以目标 Minecraft/PluginBase 版本资料为准。当前文档的示例表达工具分层，不允许跳过 `pluginbase_evidence.py query` 后猜测重载或版本可用性。
+- `Material`、自定义模型、物品模型和具体工具方法都必须以目标 Minecraft/PluginBase 版本资料为准。当前文档的示例表达工具分层，不允许跳过依赖索引定位与同版本资料复核后猜测重载或版本可用性。
 
 ### 创建和填充
 

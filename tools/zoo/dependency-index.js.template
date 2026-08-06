@@ -36,8 +36,9 @@ module.exports = {
     configuration: z.string().optional().describe("可选的 Gradle 配置名"),
     transitive: z.boolean().optional().describe("dependencies 是否附带传递依赖边"),
     limit: z.number().int().min(1).max(20).optional().describe("最大结果数，默认 8"),
+    verbose: z.boolean().optional().describe("show 是否附带主 JAR、sources/Javadoc 的本机路径与哈希"),
   }),
-  async execute({ action, query, module, type, configuration, transitive, limit }) {
+  async execute({ action, query, module, type, configuration, transitive, limit, verbose }) {
     const args = [action]
     if (action === "classes" || action === "members") {
       if (!query?.trim()) return "错误：此查询需要 query。"
@@ -47,6 +48,7 @@ module.exports = {
     if (action === "show") {
       if (!query?.trim()) return "错误：show 需要 query。"
       args.push("--artifact", query)
+      if (verbose) args.push("--verbose")
     }
     if (action === "dependencies") {
       if (!module?.trim()) return "错误：dependencies 需要 module。"

@@ -1,12 +1,14 @@
-# 本地资料状态目录
+# 本地状态目录
 
-本目录是未来 API/PluginBase 资料工具的运行期工作区。它随 `agent-dev/` 复制到目标插件项目，但其中除本文件外的内容默认不进入版本控制，也不参与插件构建或 Shadow 打包。
+`agent-dev/state/` 是当前插件项目的本机工作状态目录。除本文件外，所有内容均不提交、不分发、不参与插件构建或 Shadow 打包。
 
-## 持久本地环境配置
+本目录只保存三类轻量本地状态：机器 Gradle 环境、可重建依赖索引和项目依赖使用笔记。它不保存第三方 sources/Javadoc 归档或完整解包资料。
 
-`state/environment.json` 是本项目开发环境的持久本地配置。它专门保存上下文压缩、重新连接或更换 Agent 后仍必须保留的机器相关信息；它和下载缓存一样只留在本机，不得提交、分发或打进插件 JAR。
+## 持久 Gradle 环境
 
-首次通过 Skill 安装资料包时，安装器会调用目标项目自己的 Gradle Wrapper，读取 Gradle 实际报告的 `gradleUserHomeDir` 并自动写入如下配置；Windows 路径使用正斜杠。已有有效配置会保留。只有 Wrapper 无法启动时才使用 `--gradle-user-home` 作为显式诊断覆盖：
+`state/environment.json` 保存项目实际使用的 Gradle 用户目录，使恢复会话或更换 Agent 后仍能定位同一份本机缓存。
+
+首次通过 Skill 初始化时，安装器会调用目标项目自己的 Gradle Wrapper，读取 Gradle 实际报告的 `gradleUserHomeDir` 并写入配置。已有有效配置会保留。只有 Wrapper 无法启动时才使用 `--gradle-user-home` 作为显式诊断覆盖。
 
 ```json
 {
@@ -18,30 +20,31 @@
 ```
 
 - `gradleUserHomes` 是按优先顺序搜索的非空路径数组，可填写多个专用缓存目录。
-- 取证工具未收到 `--gradle-user-home` 时，发现此文件就**只**搜索其中列出的路径；不会再回退到 `GRADLE_USER_HOME` 或默认 `C:` 用户目录。
-- 空数组或无效 JSON 是配置错误，工具会停止并提示修复，而不是继续误查默认目录。
-- `--gradle-user-home <目录>` 是单次命令的最高优先级覆盖，可用于临时诊断；它不会修改 `environment.json`。
-- 每个恢复、压缩后继续的 Agent 任务都先读取此文件，再执行资料同步。路径不存在时可下载资料，但仍不会改去扫描其它盘符。
+- 未传 `--gradle-user-home` 时，环境文件存在就只使用其中的路径；不会回退到 `GRADLE_USER_HOME` 或默认 `C:` 用户目录。
+- 空数组或无效 JSON 是配置错误，工具会停止并提示修复，而不是误查默认目录。
+- `--gradle-user-home <目录>` 是单次命令的最高优先级覆盖，不会修改 `environment.json`。
 
-## 运行期子目录
+## 运行期目录
 
 ```text
 state/
-  environment.json # 机器本地环境配置；首次安装创建，不分发、不提交
-  downloads/       # 取证工具专用的原始 sources/Javadoc 归档
-  evidence/        # 取证工具安全解包后的源码与 Javadoc
-  indexes/         # 紧凑 SQLite 依赖、类名、公开 API 与继承关系索引
-  records/         # 本地查询输出和临时证据记录
+  environment.json # 本机 Gradle 环境配置；初始化创建，不提交
+  indexes/         # 可重建 SQLite 依赖、类名、公开 API 与继承关系索引
+  notes/           # 本机项目依赖使用习惯与已验证边界的轻量 Markdown 笔记
 ```
+
+`indexes/dependency-index.sqlite3` 由项目 Gradle 的真实解析结果完整重建。它只保存紧凑索引数据和必要摘要；第三方二进制 JAR、sources/Javadoc 仍由 Gradle 管理的本机缓存保存，资料包不会复制、下载或解包它们。
+
+`notes/` 用于跨会话保留本项目的依赖使用习惯，例如实际 GAV、重定位目标、适配层、线程/生命周期边界、已拒绝方案和失效条件。具体格式与禁止内容见 `../docs/evidence/dependency-notes.md`。
 
 ## 使用边界
 
-- 只保存当前插件项目开发所需的第三方资料和机器本地环境配置；
-- 不保存服务端世界、生产数据库、密码、令牌或私有仓库凭据；
-- 不把任何内容打进插件 JAR；
-- 不提交 `state/` 的下载归档、解包资料、索引或临时记录；
-- 需要长期保留的结论，应转写成精简 Markdown 证据记录，包含坐标、版本、哈希和必要签名，而不是提交整份第三方归档；
-- `indexes/dependency-index.sqlite3` 可随 Gradle 构建输入、Wrapper、锁文件或归档哈希变化重建，不应提交；依赖索引会流式读取 Gradle 缓存或临时下载的归档，只保存签名和短文档摘要，不保存 sources/Javadoc 副本或解包树。
+- 只保存当前项目开发所需的本地环境、可重建索引与轻量笔记；
+- 不保存第三方归档、完整源码/Javadoc、反编译文本、大段命令输出或网页副本；
+- 不保存服务端世界、生产数据库、密码、令牌、私有仓库凭据或真实生产连接串；
+- 不把任何状态内容打进插件 JAR；
+- 依赖笔记不能替代当前版本的索引查询和必要资料复核；
+- 需要团队共享的稳定结论，应写入项目正式文档、提交说明或代码注释，而非提交本机 `state/`。
 
 项目根 `.gitignore` 应包含：
 
@@ -49,4 +52,4 @@ state/
 agent-dev/state/
 ```
 
-若本资料包尚未复制到项目内，则对应忽略规则为未来目标项目的规则；不要将本目录错误放入插件的 `src/`、`resources/` 或 `build/`。
+不要将本目录放入插件的 `src/`、`resources/` 或 `build/`。

@@ -12,25 +12,12 @@
 
 1. 从 `build.gradle.kts` 的 `top.mrxiaom:LibrariesResolver-Gradle` 读取 PluginBase 统一精确版本。
 2. 从 `pluginBaseModules` 确认实际启用的模块。配置箱子菜单至少需要 `gui`；按实际功能再确认 `actions`、`l10n`、`paper`。
-3. 使用统一版本同步并查询实际模块；不要猜测其它版本的配置字段或 Java 签名：
-
-   ```text
-   python agent-dev/tools/pluginbase_evidence.py sync --version <统一版本> --module gui
-   python agent-dev/tools/pluginbase_evidence.py query --version <统一版本> --module gui --symbol AbstractGuiModule
-   python agent-dev/tools/pluginbase_evidence.py query --version <统一版本> --module gui --symbol AbstractGuisModule
-   python agent-dev/tools/pluginbase_evidence.py query --version <统一版本> --module gui --symbol LoadedIcon
-   ```
-
-4. 若配置图标点击后使用 Action，额外同步 `actions`；若使用语言 Holder 或可重载用户消息，额外同步 `l10n`。仅在构建脚本确实启用模块时执行：
-
-   ```text
-   python agent-dev/tools/pluginbase_evidence.py sync --version <统一版本> --module actions
-   python agent-dev/tools/pluginbase_evidence.py sync --version <统一版本> --module l10n
-   ```
+3. 按 `../evidence/dependency-index-zoo-tool.md` 或 `../evidence/dependency-index-cli.md` 查询项目实际解析的 GUI 构件，定位 `AbstractGuiModule`、`AbstractGuisModule`、`LoadedIcon` 与计划调用的成员；需要完整实现语义时，再按 `../evidence/query-playbook.md` 直接读取同版本 `sources.jar`。不要猜测其它版本的配置字段或 Java 签名。
+4. 若配置图标点击后使用 Action，确认实际已解析的 `actions` 构件；若使用语言 Holder 或可重载用户消息，确认 `l10n` 构件。仅在构建脚本确实启用模块时继续；不要因 `gui` 已存在而假设其它模块能力可用。
 
 5. 阅读目标项目已有的菜单 YAML、加载器、图标模型、Action Provider 和语言 Holder。框架源码只说明通用容器模型、图标和事件边界；它没有替代项目特定菜单的完整示例或业务规则。
 
-资料不完整时，停在设计阶段。不得从别的项目复制 YAML 字段、Action 名称或语言键后假定它们适用于当前版本和当前项目。
+资料不完整时，停在设计阶段。不得从别的项目复制 YAML 字段、Action 名称或语言键后假定它们适用于当前版本和当前项目；查询失败不得自动同步。
 
 ## 三个模块的职责边界
 

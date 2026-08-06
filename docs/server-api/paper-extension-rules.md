@@ -64,8 +64,8 @@ PluginBase `paper` 模块的目标是为 `ItemEditor` 与 `InventoryFactory` 做
 
 Paper API 中常见的风险包括新增/弃用方法、事件语义、组件和资料对象、异步行为与线程限制变化。升级前：
 
-1. 同步新旧准确版本的 sources/Javadoc；
-2. 对所有 Paper-only 导入和成员做存在性/签名比较；
+1. 实际修改 Paper 依赖后重建索引，并从新旧准确版本的索引路径读取 sources/Javadoc；
+2. 对所有 Paper-only 导入和成员做运行签名存在性比较，再复核资料语义；
 3. 审查弃用、实验性和线程文档变化；
 4. 重新构建并在目标 Paper 版本启动；
 5. 若仍承诺 Spigot 回退，再在 Spigot 目标环境启动。

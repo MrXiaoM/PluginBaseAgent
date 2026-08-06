@@ -30,21 +30,21 @@
 
 涉及框架能力时，先确定需要哪个 `PluginBase` 模块。不要仅因类名“像是可用”就添加依赖或调用成员。
 
-涉及箱子容器菜单时，先从 `LibrariesResolver-Gradle` 的统一版本同步 `gui` 模块并查询计划调用的 `IGuiHolder`、`GuiManager`、`AbstractGuiModule`、`AbstractGuisModule` 或 `LoadedIcon`。配置点击动作或语言消息时，再按实际启用模块同步 `actions`、`l10n`。框架源码只确认能力边界；设计还必须读取目标项目已有的菜单类、YAML 和加载器，不能把模块源码误当完整菜单示例。
+涉及箱子容器菜单时，先以项目实际解析的 `gui` 构件查询计划调用的 `IGuiHolder`、`GuiManager`、`AbstractGuiModule`、`AbstractGuisModule` 或 `LoadedIcon`。配置点击动作或语言消息时，再确认实际已启用的 `actions`、`l10n` 构件。框架源码只确认能力边界；设计还必须读取目标项目已有的菜单类、YAML 和加载器，不能把模块源码误当完整菜单示例。
 
 涉及 `ItemPacketModifier` 或 `EvalEx-j8` 时，先阅读 `external-libraries/README.md` 与对应专题文档，再按项目锁定的 Maven Central 构件查询 POM、sources/Javadoc。前者只能用于客户端虚拟展示，必须设计发回物品还原与监听器释放；后者只能作为受约束的表达式求值器，必须先定义变量、结果、精度与业务校验，不能把公式文本当可信业务逻辑。
 
 ## 阶段 3：取得并记录证据
 
-对每个会影响实现的版本敏感结论，查询目标版本资料。遇到陌生 Gradle 依赖时，先通过 `dependency_index.py` 的真实模块依赖、类、公开签名和继承关系缩小范围；已知接收者类型时沿其 `extends`/`implements` 链查找成员实际声明处。索引只负责定位，随后仍须打开对应版本 sources/Javadoc 复核签名、重载、弃用、线程和语义。工具完成前使用本工作流定义的记录结构；工具就绪后以工具输出替代人工摘录。
+对每个会影响实现的版本敏感结论，按 `evidence/dependency-index-zoo-tool.md` 或 `evidence/dependency-index-cli.md` 查询目标版本资料。陌生 Gradle 依赖先通过真实模块依赖、类、运行字节码签名和继承关系缩小范围；已知接收者类型时沿其 `extends`/`implements` 链查找成员实际声明处。索引定位后，通过 `show --verbose` 取得主 JAR 与资料路径：优先直接读取同版本 `sources.jar` 的目标条目，缺少 sources 才临时 Vineflower 反编译主 JAR。完整步骤见 `evidence/query-playbook.md`；不要解包到 `state/`，也不要以反编译覆盖字节码签名。将可复用的已验证边界精简写入 `state/notes/`。
 
 最低记录内容：
 
 ```markdown
 - 结论：<采用的接口或框架行为>
 - 目标：<Spigot 或 Paper>，<精确 Minecraft/API 版本>
-- 来源：<sources、javadoc、Gradle 元数据或 PluginBase 源码>
-- 位置：<相对文件路径、类名、成员签名或 Javadoc 锚点>
+- 来源：<运行字节码、sources、Javadoc、Gradle 元数据或临时 Vineflower 反编译>
+- 位置：<GAV、SHA-256、归档内路径、类名、成员签名或 Javadoc 锚点>
 - 适用性：<为何满足需求；是否有弃用、实验性、线程或版本边界>
 - 回退：<不适用或无法支持的版本处理方式>
 ```

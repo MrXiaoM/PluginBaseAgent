@@ -49,7 +49,7 @@ val shadowGroup = "<插件私有包>.libs"
 
 `LibraryHelper` 由构建脚本中的 `top.mrxiaom:LibrariesResolver-Gradle:<版本>` 提供，负责对齐 PluginBase 相关依赖、初始化 Java 设置和发布设置。该构件的**精确版本**是当前项目所有 PluginBase 模块的统一版本锚点：`base.modules` 中的 `library`、`misc`、`paper` 等模块均应使用这一版本，不应逐个查询、猜测或手写不同版本的模块坐标。
 
-新增或删除框架能力时，应调整 `pluginBaseModules`，而不是手写不受版本管理的模块坐标。初始化资料环境时，先读取 `LibrariesResolver-Gradle` 的精确版本，再从 `pluginBaseModules` 收集项目实际启用的模块，并仅同步这些模块的 sources/Javadoc；未启用模块既不随插件打包，也不需要预先同步资料。
+新增或删除框架能力时，应调整 `pluginBaseModules`，而不是手写不受版本管理的模块坐标。依赖集合实际变化后，按受限同步规则重建索引；Gradle 会解析 `pluginBaseModules` 中实际启用模块的主 JAR、sources/Javadoc。未启用模块既不随插件打包，也不需要预先获取资料。
 
 模板基线模块为 `library` 与 `misc`。可根据需求加入：
 

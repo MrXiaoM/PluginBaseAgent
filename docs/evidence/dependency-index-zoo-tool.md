@@ -21,6 +21,7 @@
 | 查询方法、字段、类型或签名 | `action: "members"`、`query` |
 | 沿继承链查接收者可见成员 | `action: "members"`、`query`、`type: "完整或简单类型名"` |
 | 查看构件摘要 | `action: "show"`、`query: "GAV 或哈希前缀"` |
+| 查看主 JAR、sources/Javadoc 路径与哈希 | `action: "show"`、`query: "GAV 或哈希前缀"`、`verbose: true` |
 
 `limit` 只在结果较多时设置，范围为 `1` 至 `20`。`dependencies` 可使用 `configuration` 限定 Gradle 配置。
 
@@ -28,7 +29,7 @@
 
 1. 陌生库先查询 `classes`，定位实际类和 GAV。
 2. 再用 `members` 查目标方法、字段或构造器；已知接收者类型时必须提供 `type`，让索引沿 `extends`/`implements` 关系定位真实声明处。
-3. 需要确认依赖来源或 Shadow/重定位影响时，用 `show` 或 `dependencies` 查询。
+3. 需要确认依赖来源或 Shadow/重定位影响时，用 `show` 或 `dependencies` 查询；需要实现细节时，以 `show` 的 `verbose: true` 取得主 JAR 与 `sources.jar` 路径，再按 `query-playbook.md` 直接读取 sources 或临时反编译。
 4. 结果不足时，不用 `javap` 反复试探，不自动同步；记录阻塞并按项目证据规则继续处理。
 
 ## 需要同步的唯一常规场景
