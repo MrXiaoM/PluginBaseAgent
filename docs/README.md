@@ -56,7 +56,9 @@
 | `evidence/evidence-policy.md` | 哪些结论必须取证、可接受来源、精确版本和停止条件。 |
 | `evidence/evidence-record-format.md` | 记录接口或框架结论的标准模板。 |
 | `evidence/query-playbook.md` | 资料同步、缓存、人工查询与当前工具命令协议。 |
-| `evidence/dependency-index.md` | 按 Gradle 模块建立依赖、类、公开 API 与继承关系索引，并可选接入 Zoo Code。 |
+| `evidence/dependency-index.md` | 按 Gradle 模块建立依赖、类、公开 API 与继承关系索引的存储、取证与重建边界。 |
+| `evidence/dependency-index-zoo-tool.md` | Zoo 工具已加载时的强制依赖索引查询规则与参数映射。 |
+| `evidence/dependency-index-cli.md` | 未提供 Zoo 工具时的 CLI 查询规则与受限同步条件。 |
 
 ## 质量与维护
 

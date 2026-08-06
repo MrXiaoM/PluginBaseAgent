@@ -51,7 +51,7 @@
 3. 阅读 `docs/00-layout-and-usage.md`，确认当前项目中资料包的位置和可写目录。
 4. 阅读 `docs/01-agent-contract.md`，确认目标 Minecraft 版本、服务器 API 与兼容边界。
 5. 根据任务读取 `docs/02-development-workflow.md` 和对应专题文档。
-6. 遇到陌生 Gradle 依赖时，先用 `tools/dependency_index.py status/sync` 建立并查询真实模块依赖、类、公开签名和继承关系；索引只负责定位，不替代 sources/Javadoc 复核。
+6. 遇到陌生 Gradle 依赖时，按 `docs/evidence/dependency-index-zoo-tool.md` 或 `docs/evidence/dependency-index-cli.md` 选择唯一查询通道：Zoo 工具存在时只调用工具，不执行依赖索引 CLI；否则直接执行具体 CLI 查询，不做 `status` 预检。初始化器已建立首次索引；仅在 Agent 实际修改依赖集合或用户明确要求时才允许 `sync`。索引只负责定位，不替代 sources/Javadoc 复核。
 7. 使用 `tools/api_evidence.py` 或 `tools/pluginbase_evidence.py` 同步并查询目标版本资料，再实现版本敏感代码。
 8. 修改完成后按 `docs/quality/build-and-artifact-checklist.md` 执行构建与产物检查。
 

@@ -1,46 +1,49 @@
 # 快速上手
 
-用这份资料从零创建一个 `PluginBase` 插件项目，并让 AI 开发工具具备项目内开发文档与资料查询能力。
+这份指南帮助你把 `minecraft-pluginbase-development` Skill 安装到一个现有的 Gradle Minecraft 插件项目，并完成项目内资料包初始化。
 
-## 1. 生成插件项目
+## 1.准备条件
 
-访问 https://bukkit.mcio.dev/ ，填写插件名、包名、最低 API 版本等信息后下载并解压项目。
+开始前请确认：
 
-默认使用 Spigot API。只有明确需要 Paper 专有 API 时才选择 Paper API；页面中的 `paper` 模块用于 Spigot/Paper 双端物品与库存兼容，不等于可以直接调用 Paper API。
+- 已有一个可正常打开的 Gradle 插件项目，并安装 PluginBase 相关构件；
+- 如果没有，可以到 https://bukkit.mcio.dev/ 生成一个模板项目；
+- 项目根目录包含 `gradlew` 或 `gradlew.bat`；
+- 已安装项目所需的 Java 与 Python；
+- 使用的 AI 开发工具支持项目级 Skill。
 
-## 2. 打开并构建
-
-用 Java `25` 作为 IDE 项目 SDK 与 Gradle JVM 打开项目，然后在项目根目录执行：
+建议先在项目根目录执行一次构建，确认项目本身没有配置错误：
 
 ```shell
 ./gradlew build
 ```
 
-Windows 原生命令行可执行：
+在 Windows 原生命令行中可使用：
 
-```batch
+```shell
 gradlew.bat build
 ```
 
-`targetJavaVersion` 决定最终字节码兼容级别，不要因为构建使用 Java `25` 就擅自修改它。
+## 2.安装 Skill
 
-## 3. 安装 Skill
+将发行包中的整个 `skill/minecraft-pluginbase-development/` 目录复制到项目对应的 Skill 目录。
 
-将发行包中的整个 `skill/minecraft-pluginbase-development/` 目录复制到所用 AI 开发工具的项目级目录：
-
-| AI 开发工具 | 安装目录 |
+| AI 开发工具 | 项目内安装目录 |
 | --- | --- |
+| Zoo Code | `.roo/skills/minecraft-pluginbase-development/` |
 | Roo Code | `.roo/skills/minecraft-pluginbase-development/` |
 | Claude Code | `.claude/skills/minecraft-pluginbase-development/` |
 | Codex | `.agents/skills/minecraft-pluginbase-development/` |
 | OpenCode | `.opencode/skills/minecraft-pluginbase-development/` |
 
-## 4. 初始化开发环境
+需要确保上述安装目录内存在 `SKILL.md` 文件。
 
-在插件项目根目录，选择已安装的工具并执行**一条命令**：
+## 3.初始化项目资料
 
-```text
-# Roo / Zoo Code
+在插件项目根目录执行与 Skill 安装位置对应的一条命令：
+
+```shell
+# Zoo Code / Roo Code
 python .roo/skills/minecraft-pluginbase-development/scripts/install_kit.py --project .
 
 # Claude Code
@@ -53,20 +56,63 @@ python .agents/skills/minecraft-pluginbase-development/scripts/install_kit.py --
 python .opencode/skills/minecraft-pluginbase-development/scripts/install_kit.py --project .
 ```
 
-从 Roo / Zoo Code 的 `.roo/skills/` 入口运行时，依赖索引工具会自动安装到 `./.roo/tools/`；随后在 Zoo Code 的 Experimental 设置启用 Custom Tools。
+初始化器会：
 
-完成后，确保项目根 `.gitignore` 包含：
+- 在项目根目录创建 `agent-dev/` 开发资料包；
+- 读取项目 Gradle 的实际本地缓存位置；
+- 建立首次依赖索引；
+- 为 Zoo Code / Roo Code 项目安装可选的依赖索引工具。
+
+初始化完成后，确保项目根 `.gitignore` 包含：
 
 ```gitignore
 agent-dev/state/
 ```
 
-## 5. 开始开发
+> **可选启用项目工具**
+> 
+> 若使用 Zoo Code，初始化完成后，项目工具位于 `.roo/tools/`。
+> 
+> 按以下步骤来启用这个工具，便于 Agent 去查询索引：
+> 
+> 1. 打开 Zoo Code 的 “实验性” 设置；
+> 2. 勾选 “启用自定义工具”；
+> 3. 执行该选项右侧的 “刷新”，或重载 VS Code 窗口。
+> 
 
-然后向已安装的 AI 工具发送一次以下提示词，完成项目资料环境初始化：
+## 4.开始使用
+
+现在可以直接开始插件开发、维护或审查工作。项目内 `agent-dev/` 包含开发规范、PluginBase 资料、服务端 API 规则、依赖索引工具与构建检查清单。
+
+常用入口：
+
+| 需要查看的内容 | 位置 |
+| --- | --- |
+| 开发资料总览 | `agent-dev/README.md` |
+| 开发规则 | `agent-dev/docs/01-agent-contract.md` |
+| PluginBase 与服务端 API 文档 | `agent-dev/docs/README.md` |
+| 构建与产物检查 | `agent-dev/docs/quality/build-and-artifact-checklist.md` |
+
+## 常见问题
+
+### 初始化器找不到 Gradle Wrapper
+
+确认命令是在插件项目根目录执行，并且根目录中存在 `gradlew` 或 `gradlew.bat`。
+
+### 初始化过程中 Gradle 失败
+
+先修复项目本身的 Gradle 配置、仓库或依赖问题，再重新执行同一条初始化命令。已创建的 `agent-dev/` 会保留。
+
+### Zoo Code 中看不到项目工具
+
+确认 Skill 位于 `.roo/skills/minecraft-pluginbase-development/`，重新执行初始化命令后，在 Experimental 设置中启用 Custom Tools，并执行 `Refresh Custom Tools` 或重载窗口。
+
+### 想重新安装资料包
+
+在原初始化命令末尾添加 `--force`：
 
 ```text
-请先读取本项目的 agent-dev/state/environment.json、agent-dev/README.md 和 agent-dev/docs/01-agent-contract.md；严格使用 environment.json 的 gradleUserHomes，不要扫描默认 C 盘 Gradle 目录。检查 build.gradle.kts、plugin.yml 与当前 PluginBase 配置；将 build.gradle.kts 中 top.mrxiaom:LibrariesResolver-Gradle 的精确版本作为所有 PluginBase 模块的统一版本锚点，从 pluginBaseModules 收集实际启用的模块，仅同步这些模块的资料，不要逐个猜测或获取其它模块版本。以项目中声明的 Minecraft 版本原样同步所需的 Spigot 或 Paper API 资料。不要修改项目代码或构建配置；完成后报告 API 与 PluginBase 的精确构件版本、已同步模块、同步来源、缓存位置和未能取得的资料。
+python .roo/skills/minecraft-pluginbase-development/scripts/install_kit.py --project . --force
 ```
 
-发送前，请先在项目配置或提示词中明确目标 Minecraft 版本；用户指定的版本必须原样保留，不能自行改写。首次涉及版本敏感 API 或 PluginBase 符号时，AI 仍会先用 `agent-dev/tools/` 查询已同步资料。
+`--force` 会更新资料包受管文件；本机资料状态仍保留在 `agent-dev/state/`，不应提交到插件仓库。

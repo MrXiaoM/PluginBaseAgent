@@ -44,26 +44,23 @@ PluginBase 资料默认从 Maven Central 的 `top.mrxiaom.pluginbase` 坐标下�
 
 用于从**目标项目自己的 Gradle Wrapper**取得真实的多模块解析结果，并在 `state/indexes/dependency-index.sqlite3` 建立依赖、JAR 类名、公开 Java API 签名与继承关系索引。它不解析 `build.gradle.kts` 文本来猜测依赖，也不会修改目标构建文件；临时 Gradle init script 在命令结束后删除。
 
+具体调用规则不在本文件决定：Zoo 工具已加载时遵循 `../docs/evidence/dependency-index-zoo-tool.md` 并只调用工具；未提供 Zoo 工具时遵循 `../docs/evidence/dependency-index-cli.md` 并直接执行具体 CLI 查询。两条通道均不执行 `status` 预检。
+
+`sync` 仅在 Agent 已实际添加、删除或变更 Gradle 依赖坐标、版本或所属配置，或用户明确要求时允许：
+
 ```text
 python agent-dev/tools/dependency_index.py sync --project .
-python agent-dev/tools/dependency_index.py status --project .
-python agent-dev/tools/dependency_index.py modules --project .
-python agent-dev/tools/dependency_index.py dependencies --project . --module :
-python agent-dev/tools/dependency_index.py classes --project . <类名或包关键词>
-python agent-dev/tools/dependency_index.py members --project . <类型、方法、字段或签名关键词>
-python agent-dev/tools/dependency_index.py members --project . addItem --type PlayerInventory
-python agent-dev/tools/dependency_index.py show --project . --artifact <GAV或哈希前缀>
 ```
 
 `sync` 对每个可解析 Gradle 配置记录解析后的构件、项目/传递依赖边和失败项；Gradle 还会按项目实际仓库、镜像、认证与缓存策略解析同版本 `sources.jar`、`javadoc.jar`。Python 不扫描 Gradle 缓存猜测资料，也不自行联网下载。所有公开类型、字段、构造器、方法签名与继承关系均从最终运行 JAR 的 `.class` 字节码读取，因而不会被不规范 sources、Shadow 合并或重定位后的原始资料改写。sources/Javadoc 只用于补全位置和短摘要：先按完整类型名关联，重定位后仅当同简单类名唯一且成员种类、名称、参数数目、数组维度、基本类型及可稳定比较的引用类型结构均一致时才关联；任意歧义会省略文档。第 `1/4` 阶段实时转发 Gradle 日志，并在首次解析资料变体时显示 `解析资料构件 N：<GAV>:sources|javadoc`；机器索引 JSON 不会输出到终端。类名和公开 API 都以每批 `2,000` 条写入 SQLite，类名显示 `类名 N/M`，运行字节码签名显示 `字节码结构 N/M`。所有构件完成后才一次性重建 SQLite `FTS5` 类名与 API 索引，避免逐条维护全文索引；归档和二进制 JAR 哈希会按文件状态复用。`--no-api` 可只同步依赖与类名，并通知 Gradle 跳过资料变体；字节码签名没有参数名、泛型、注解、异常、源码行或 Javadoc，不能替代版本敏感调用的资料复核。
 
-查询默认最多输出 `8` 条，格式紧凑；`dependencies` 默认只列已解析构件，传递依赖边需显式加 `--transitive`。`classes` 和未限定的 `members` 都是模糊搜索；已知调用者类型时使用 `members <成员> --type <类型>`，它会沿已索引 `extends`/`implements` 链定位成员声明，并标注继承距离。使用 `--limit`、`--offset` 分页，使用 `--verbose` 查看路径、哈希与来源，使用 `--json` 供自动化工具调用。索引过期、缺失或解析失败时，查询不会静默重同步；先执行 `sync`，再根据 `sources`/Javadoc 命中复核版本敏感调用的签名、弃用、线程与语义。
+查询默认最多输出 `8` 条，格式紧凑；`dependencies` 默认只列已解析构件，传递依赖边需显式加 `--transitive`。`classes` 和未限定的 `members` 都是模糊搜索；已知调用者类型时使用 `members <成员> --type <类型>`，它会沿已索引 `extends`/`implements` 链定位成员声明，并标注继承距离。使用 `--limit`、`--offset` 分页，使用 `--verbose` 查看路径、哈希与来源，使用 `--json` 供自动化工具调用。索引过期、缺失或解析失败时，查询不会静默重同步；除依赖集合已实际变更或用户明确要求外，必须报告结果并停止猜测，再根据 `sources`/Javadoc 命中复核版本敏感调用的签名、弃用、线程与语义。
 
 该工具同样遵守 `state/environment.json`：未传 `--gradle-user-home` 时，环境文件存在就只使用其中的 `gradleUserHomes`，不会扫描默认 C 盘缓存。
 
 ### Zoo Code 工具
 
-从项目 `.roo/skills/minecraft-pluginbase-development/` 运行初始化脚本时，安装器会自动创建 `./.roo/tools/pluginbase-dependency-index.js`，并在该工具目录安装 `zod@3.25.76`。Zoo 对 `.js` 工具直接加载，避免项目目录缺少扩展内部 `@roo-code/types` 时的 esbuild 解析失败；参数仍使用真实 Zod schema。已有同名 `.js` 工具会保留，不自动覆盖。随后在 Zoo Code 的 Experimental 设置启用 Custom Tools，并按官方提示执行 `Refresh Custom Tools` 或重载窗口。
+从项目 `.roo/skills/minecraft-pluginbase-development/` 运行初始化脚本时，安装器会自动创建 `./.roo/tools/pluginbase-dependency-index.js`，并在该工具目录安装 `zod@3.25.76`。Zoo 对 `.js` 工具直接加载，避免项目目录缺少扩展内部 `@roo-code/types` 时的 esbuild 解析失败；参数仍使用真实 Zod schema。已有同名 `.js` 工具会保留，不自动覆盖。随后在 Zoo Code 的 Experimental 设置启用 Custom Tools，并按官方提示执行 `Refresh Custom Tools` 或重载窗口。工具加载后，Agent 必须遵循 `../docs/evidence/dependency-index-zoo-tool.md`，不得使用本 CLI 查询。
 
 Zoo Custom Tools 启用后会**自动批准**执行，因此只应启用已审查的项目工具。适配器只接受固定查询参数，以数组方式调用本 CLI，不提供任意 Shell 命令入口；它只返回紧凑字符串 JSON。`install-zoo` 子命令仅保留给非 `.roo/skills/` 安装路径的维护或修复场景。
 

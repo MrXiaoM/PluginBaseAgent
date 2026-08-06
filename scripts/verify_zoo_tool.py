@@ -68,6 +68,11 @@ def main() -> int:
     installer = load_module("install_kit", INSTALLER_PATH)
     if not TEMPLATE_PATH.is_file():
         raise RuntimeError(f"找不到 Zoo JS 模板：{TEMPLATE_PATH}")
+    template_text = TEMPLATE_PATH.read_text(encoding="utf-8")
+    if 'z.enum(["modules", "dependencies", "classes", "members", "show"])' not in template_text:
+        raise RuntimeError("Zoo 工具查询操作不符合受限集合")
+    if '"status"' in template_text or "先用 CLI sync" in template_text:
+        raise RuntimeError("Zoo 工具不应提供 status 或引导日常 CLI 同步")
     with tempfile.TemporaryDirectory(prefix="pluginbase-agent-zoo-tool-") as temporary:
         root = Path(temporary)
         target = root / "agent-dev"
@@ -106,7 +111,7 @@ def main() -> int:
             raise RuntimeError(f"CLI --force 未覆盖 Zoo JS 工具：{forced.stderr or forced.stdout}")
 
         generated_package = (tool.parent / "package.json").exists()
-    print(f"通过：Zoo JS 工具可经 Node 动态加载，两个安装入口均安装 zod@{ZOD_VERSION}，未生成锁文件，npm 生成 package.json：{generated_package}。")
+    print(f"通过：Zoo JS 工具可经 Node 动态加载，查询操作不含 status 或日常 CLI sync 引导；两个安装入口均安装 zod@{ZOD_VERSION}，未生成锁文件，npm 生成 package.json：{generated_package}。")
     return 0
 
 
