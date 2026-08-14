@@ -51,9 +51,9 @@
 
 ## 物品自定义数据
 
-当项目已安装 `item-nbt-api`，对 `ItemStack`、`ItemMeta` 及其物品标记的自定义数据读写必须使用该依赖，不得使用 Bukkit 的 `PersistentDataContainer`、`PersistentDataType` 或 `getPersistentDataContainer()` 作为同一用途的替代方案。
+当项目已安装 `item-nbt-api`，对 `ItemStack` 的自定义业务数据读写必须按 `../external-libraries/item-nbt-api.md` 通过适配层使用 `NBT.get(...)`/`NBT.modify(...)`；不得使用 Bukkit 的 `PersistentDataContainer`、`PersistentDataType` 或 `getPersistentDataContainer()` 作为同一用途的替代方案，也不得使用已弃用的 `NBTItem` 路径。
 
-PDC 在此场景不符合本项目的运行效率和开发效率要求；不要因为它是 Bukkit API 就默认选择它。先以构建脚本中声明的 `item-nbt-api` 精确版本查询资料，并将物品数据访问集中在适配层，避免业务代码混用两套存储方式。此规则只针对物品自定义数据；实体、方块或其它非物品容器的 PDC 使用需按各自需求和证据另行审查。
+PDC 在此场景不符合本项目的运行效率和开发效率要求；不要因为它是 Bukkit API 就默认选择它。精确成员仅在需要时从依赖索引的实际解析构件核验；`ItemMeta` 写回必须遵守专题中的安全顺序或使用 `NBT.modifyMeta(...)`，避免覆盖已写入的物品数据。此规则只针对物品自定义数据；实体、方块或其它非物品容器的 PDC 使用需按各自需求和证据另行审查。
 
 ## 配置序列化
 

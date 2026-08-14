@@ -39,7 +39,10 @@
 - [ ] 配置键、默认值、类型、错误和迁移行为完整。
 - [ ] Bukkit 枚举或注册表类型没有使用 `Enum.valueOf(...)`/`Material.valueOf(...)` 解析；已使用 `Util.valueOr(...)`、`Util.valueOrNull(...)` 或相应 `Util.parse*` 包装方法，并处理默认值/`null`。
 - [ ] 硬编码菜单和其它代码创建/编辑物品图标时优先使用 `AdventureItemStack`；不使用 Adventure 的既有路径或发光/模型等辅助操作使用 `ItemStackUtil` 的已验证方法，没有在业务代码重复散落裸 `ItemMeta` 读改写流程。
-- [ ] 构建脚本已安装 `item-nbt-api` 时，物品自定义数据没有使用 `PersistentDataContainer`、`PersistentDataType` 或 `ItemMeta#getPersistentDataContainer()`；同一物品数据只通过 `item-nbt-api` 读写。
+- [ ] 构建脚本已安装 `item-nbt-api` 时，真实 `ItemStack` 自定义数据只通过项目适配层的 `NBT.get(...)`/`NBT.modify(...)` 读写；没有使用 `PersistentDataContainer`、`PersistentDataType` 或 `ItemMeta#getPersistentDataContainer()` 保存同一数据。
+- [ ] 没有 `new NBTItem(...)`、`applyNBT(...)`、`clearCustomNBT()`、`mergeNBT(...)`、`mergeCustomNBT(...)`、`convertItemtoNBT(...)`、`convertNBTtoItem(...)` 或相关旧数组转换路径；发现 `@Deprecated` 时已阅读弃用描述和替代项。
+- [ ] `ItemMeta` 写回在 NBT 修改之后，或使用 `NBT.modifyMeta(...)`；不存在 `setItemMeta(...)` 覆盖先前 NBT 修改的路径。
+- [ ] Minecraft `1.20.5+` 的自定义业务数据继续使用 `NBT.get(...)`/`NBT.modify(...)` 的 `custom_data` 范围；只有确有 vanilla component 需求且成员已核验时才使用 component API。
 - [ ] 箱子容器菜单为每位玩家创建独立 Holder/会话实例；共享配置模型不保存玩家、分页、点击锁或异步状态。
 - [ ] 菜单顶部库存的 Holder、有效 slot、点击、拖拽、玩家背包和输入槽的允许/取消策略明确且已走查。
 - [ ] 菜单关闭、玩家退出、重载、停用和父子菜单跳转不会遗留旧实例、临时物品、任务或可执行的异步回调。

@@ -10,12 +10,10 @@
 
 计划阶段必须先做以下工作：
 
-1. 从 `build.gradle.kts` 的 `top.mrxiaom:LibrariesResolver-Gradle` 读取 PluginBase 统一精确版本。
-2. 从 `pluginBaseModules` 确认实际启用的模块。配置箱子菜单至少需要 `gui`；按实际功能再确认 `actions`、`l10n`、`paper`。
-3. 按 `../evidence/dependency-index-zoo-tool.md` 或 `../evidence/dependency-index-cli.md` 查询项目实际解析的 GUI 构件，定位 `AbstractGuiModule`、`AbstractGuisModule`、`LoadedIcon` 与计划调用的成员；需要完整实现语义时，再按 `../evidence/query-playbook.md` 直接读取同版本 `sources.jar`。不要猜测其它版本的配置字段或 Java 签名。
-4. 若配置图标点击后使用 Action，确认实际已解析的 `actions` 构件；若使用语言 Holder 或可重载用户消息，确认 `l10n` 构件。仅在构建脚本确实启用模块时继续；不要因 `gui` 已存在而假设其它模块能力可用。
-
-5. 阅读目标项目已有的菜单 YAML、加载器、图标模型、Action Provider 和语言 Holder。框架源码只说明通用容器模型、图标和事件边界；它没有替代项目特定菜单的完整示例或业务规则。
+1. 从 `pluginBaseModules` 确认实际启用的模块。配置箱子菜单至少需要 `gui`；按实际功能再确认 `actions`、`l10n`、`paper`。不要读取、推断或记录 `LibrariesResolver-Gradle` 的隐式版本。
+2. 按 `../evidence/dependency-index-zoo-tool.md` 或 `../evidence/dependency-index-cli.md` 查询项目实际解析的 GUI 构件，定位 `AbstractGuiModule`、`AbstractGuisModule`、`LoadedIcon` 与计划调用的成员；需要完整实现语义时，再按 `../evidence/query-playbook.md` 直接读取同版本 `sources.jar`。不要猜测其它版本的配置字段或 Java 签名。
+3. 若配置图标点击后使用 Action，确认实际已解析的 `actions` 构件；若使用语言 Holder 或可重载用户消息，确认 `l10n` 构件。仅在构建脚本确实启用模块时继续；不要因 `gui` 已存在而假设其它模块能力可用。
+4. 阅读目标项目已有的菜单 YAML、加载器、图标模型、Action Provider 和语言 Holder。框架源码只说明通用容器模型、图标和事件边界；它没有替代项目特定菜单的完整示例或业务规则。
 
 资料不完整时，停在设计阶段。不得从别的项目复制 YAML 字段、Action 名称或语言键后假定它们适用于当前版本和当前项目；查询失败不得自动同步。
 
@@ -110,7 +108,7 @@ other-icons:
 `LoadedIcon` 提供通用图标配置与点击动作接入，但其可用字段、材质提供器、NBT 行为和已注册 Action Provider 仍必须按当前模块资料查询。使用时：
 
 - 装饰图标与业务图标分开；前者可由 `other-icons` 生成，后者由项目模型根据玩家/数据生成；
-- 物品图标若需自定义 NBT，且项目已安装 `item-nbt-api`，使用该依赖，不使用 PDC 作为替代；
+- 物品图标若需自定义 NBT，且项目已安装 `item-nbt-api`，按 `../external-libraries/item-nbt-api.md` 使用适配层中的 `NBT.get(...)`/`NBT.modify(...)`，不使用已弃用的 `NBTItem` 路径或 PDC 作为替代；
 - Action 列表必须只引用当前项目已注册且已查询的动作类型；敏感操作仍由 Java 在执行前校验；
 - 面向玩家的成功/失败消息使用项目的 L10n 约定；不要在 YAML、Action 和 Java 中复制分散且不可重载的同一条文本；
 - 任何 Placeholder、替换参数或语言参数都视为输入边界，不能拼接为未经审查的命令或数据库查询。

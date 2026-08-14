@@ -16,7 +16,7 @@
 - 预计修改的项目文件和资源；
 - 可用于验证的构建任务、测试环境和服务器版本。
 
-阅读当前项目的 `build.gradle.kts`、`plugin.yml`、主类和相邻功能模块。不要以模板文档覆盖现有项目已验证的特殊约定；发现差异后先判断它是合理的项目定制还是遗留缺陷。
+阅读当前项目的 `build.gradle.kts`、`plugin.yml`、主类和相邻功能模块，以及任务对应的 `agent-dev/docs/` 设计文档。先以设计文档确定职责、生命周期、数据归属、模块选择和禁止方案；不要以模板文档覆盖现有项目已验证的特殊约定。只有设计文档未覆盖、当前调用需要精确签名或运行语义，或项目实现与文档冲突时，才查询最小必要的框架资料。
 
 ## 阶段 2：选择实现层
 
@@ -28,15 +28,15 @@
 4. 用户明确允许且完成版本资料核验后的 NMS/CraftBukkit 实现；
 5. 无法满足时，向用户说明边界，而不是构造未验证接口。
 
-涉及框架能力时，先确定需要哪个 `PluginBase` 模块。不要仅因类名“像是可用”就添加依赖或调用成员。
+涉及框架能力时，先按 `pluginbase/modules-and-capabilities.md` 确定是否真的需要模块；不要仅因类名“像是可用”就添加依赖或调用成员。只确认 `pluginBaseModules` 是否声明所需能力；不读取、不推断、不记录 `LibrariesResolver-Gradle` 的隐式版本。需要构件或精确签名时查询依赖索引的实际解析结果；确实增删模块后仅修改 `pluginBaseModules`，并在获准同步后重建索引。
 
 涉及箱子容器菜单时，先以项目实际解析的 `gui` 构件查询计划调用的 `IGuiHolder`、`GuiManager`、`AbstractGuiModule`、`AbstractGuisModule` 或 `LoadedIcon`。配置点击动作或语言消息时，再确认实际已启用的 `actions`、`l10n` 构件。框架源码只确认能力边界；设计还必须读取目标项目已有的菜单类、YAML 和加载器，不能把模块源码误当完整菜单示例。
 
-涉及 `ItemPacketModifier` 或 `EvalEx-j8` 时，先阅读 `external-libraries/README.md` 与对应专题文档，再按项目锁定的 Maven Central 构件查询 POM、sources/Javadoc。前者只能用于客户端虚拟展示，必须设计发回物品还原与监听器释放；后者只能作为受约束的表达式求值器，必须先定义变量、结果、精度与业务校验，不能把公式文本当可信业务逻辑。
+涉及 `ItemPacketModifier`、`EvalEx-j8` 或 `item-nbt-api` 时，先阅读 `external-libraries/README.md` 与对应专题文档；只对本任务计划调用的精确 API 查询依赖索引返回的实际构件的 POM、sources/Javadoc。`ItemPacketModifier` 只能用于客户端虚拟展示，必须设计发回物品还原与监听器释放；`EvalEx-j8` 只能作为受约束的表达式求值器，必须先定义变量、结果、精度与业务校验，不能把公式文本当可信业务逻辑；`item-nbt-api` 必须使用 `NBT.get(...)`/`NBT.modify(...)` 处理真实 `ItemStack` 自定义数据，并集中在项目 NBT 适配层，不能以 PDC 双写或回退，也不能使用已弃用的 `NBTItem` 路径。
 
 ## 阶段 3：取得并记录证据
 
-对每个会影响实现的版本敏感结论，按 `evidence/dependency-index-zoo-tool.md` 或 `evidence/dependency-index-cli.md` 查询目标版本资料。陌生 Gradle 依赖先通过真实模块依赖、类、运行字节码签名和继承关系缩小范围；已知接收者类型时沿其 `extends`/`implements` 链查找成员实际声明处。索引定位后，通过 `show --verbose` 取得主 JAR 与资料路径：优先直接读取同版本 `sources.jar` 的目标条目，缺少 sources 才临时 Vineflower 反编译主 JAR。完整步骤见 `evidence/query-playbook.md`；不要解包到 `state/`，也不要以反编译覆盖字节码签名。将可复用的已验证边界精简写入 `state/notes/`。
+对设计文档未覆盖、且会影响实现的版本敏感结论，按 `evidence/dependency-index-zoo-tool.md` 或 `evidence/dependency-index-cli.md` 查询目标版本资料。陌生 Gradle 依赖先通过真实模块依赖、类、运行字节码签名和继承关系缩小范围；已知接收者类型时沿其 `extends`/`implements` 链查找成员实际声明处。索引定位后，通过 `show --verbose` 取得主 JAR 与资料路径：优先直接读取同版本 `sources.jar` 的目标条目，缺少 sources 才临时 Vineflower 反编译主 JAR。完整步骤见 `evidence/query-playbook.md`；不要解包到 `state/`，也不要以反编译覆盖字节码签名。将可复用的已验证边界精简写入 `state/notes/`。
 
 最低记录内容：
 
@@ -92,6 +92,7 @@
 - 自动注册、配置保存/重载和可选依赖失败路径完整；
 - `ItemPacketModifier` 的客户端展示与真实物品数据隔离、虚拟 Lore 幂等标记、客户端回传还原、包监听器停用释放和高频回调边界完整；
 - `EvalEx-j8` 的公式变量白名单、类型/范围/精度校验、解析失败回退、缓存/副本并发和业务副作用前校验完整；
+- `item-nbt-api` 只通过项目适配层的 `NBT.get(...)`/`NBT.modify(...)` 使用，不含已弃用的 `NBTItem` 路径，不与 PDC 双写，且 `ItemMeta` 写回顺序或 `NBT.modifyMeta(...)` 已验证；
 - 箱子容器菜单的顶部 Holder、玩家背包/拖拽取消策略、重复点击、关闭/退出、重载和异步回调边界完整；
 - `plugin.yml` 与主类、命令和依赖声明一致；
 - Shadow 规则覆盖 `PluginBase` 与会打进 JAR 的实现依赖。

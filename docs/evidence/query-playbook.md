@@ -16,11 +16,12 @@ agent-dev/
 
 ## 查询前准备
 
-1. 从目标项目实际构建输入确认 Minecraft 版本、Spigot/Paper 选择、模块和依赖边界。
-2. 读取 `agent-dev/state/environment.json`；恢复上下文、重新连接或交接时也必须重读。文件存在时只能使用其中 `gradleUserHomes`，不得扫描默认 C 盘缓存。
-3. 涉及已有依赖、PluginBase 模块、服务端 API 或 Shadow 重定位时，读取相关 `agent-dev/state/notes/*.md`。
-4. 按 `dependency-index-zoo-tool.md` 或 `dependency-index-cli.md` 选择唯一索引查询通道；不执行 `status` 预检。
-5. 只有 Agent 已实际改变依赖集合，或用户明确要求时，才允许一次 `dependency_index.py sync --project .`。索引缺失、过期、无命中或资料不足均不授权同步。
+1. 先阅读任务对应的 `agent-dev/docs/` 设计文档和目标项目相邻实现，用已定义的职责、生命周期、数据归属、模块选择与禁止方案完成常规架构决策；不得为重复确认这些结论而阅读框架实现源码或查询依赖资料。
+2. 从目标项目实际构建输入确认 Minecraft 版本、Spigot/Paper 选择、模块和依赖边界。对 PluginBase 只检查 `pluginBaseModules` 的能力集合；不读取、不推断、不记录 `LibrariesResolver-Gradle` 的隐式版本。
+3. 读取 `agent-dev/state/environment.json`；恢复上下文、重新连接或交接时也必须重读。文件存在时只能使用其中 `gradleUserHomes`，不得扫描默认 C 盘缓存。
+4. 涉及已有依赖、PluginBase 模块、服务端 API 或 Shadow 重定位时，读取相关 `agent-dev/state/notes/*.md`。
+5. 只有设计文档未覆盖、当前调用需要精确签名或运行语义，或索引/构建结果与文档冲突时，才按 `dependency-index-zoo-tool.md` 或 `dependency-index-cli.md` 选择唯一索引查询通道；不执行 `status` 预检。
+6. 只有 Agent 已实际改变依赖集合，或用户明确要求时，才允许一次 `dependency_index.py sync --project .`。索引缺失、过期、无命中或资料不足均不授权同步。
 
 ## 定位签名与构件
 
@@ -34,7 +35,7 @@ python agent-dev/tools/dependency_index.py members --project . <成员或签名>
 
 结果在签名下显示索引已唯一确认的 `Javadoc 页面` 和 `摘要`；JSON 同时提供 `javadoc`、`documentation` 字段。该查询只读取 SQLite，不重新扫描或打开 Javadoc 归档。资料关联有歧义或索引未能确认时不显示摘要，不得猜测。
 
-版本敏感调用不能只凭模糊搜索结果写入。还要根据返回的精确 GAV、哈希、源码位置或 Javadoc 摘要核对完整重载、弃用、注解、线程与语义。sources/Javadoc 与字节码不一致或重定位关联有歧义时，保留字节码签名并停止猜测。
+版本敏感调用不能只凭模糊搜索结果写入。还要根据返回的精确 GAV、哈希、源码位置或 Javadoc 摘要核对完整重载、弃用、注解、线程与语义；若成员带有 `@Deprecated`，必须读取弃用描述和替代项，不能已知替代项后继续使用旧 API。sources/Javadoc 与字节码不一致或重定位关联有歧义时，保留字节码签名并停止猜测。
 
 ## 查看依赖实现
 

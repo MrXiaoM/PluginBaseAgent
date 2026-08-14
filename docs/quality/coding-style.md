@@ -45,8 +45,9 @@
 
 ## 物品自定义数据
 
-- 当构建脚本已引入 `item-nbt-api` 时，物品自定义数据必须通过该依赖读写；不得为同一用途使用 `PersistentDataContainer`、`PersistentDataType` 或 `ItemMeta#getPersistentDataContainer()`。
-- 这是性能与维护性约束：PDC 不应作为安装 `item-nbt-api` 后的物品数据回退方案。新增或迁移物品标记、标识符、数值、序列化数据时，先查询当前 `item-nbt-api` 版本资料，并将访问封装在项目的物品数据适配层。
+- 当构建脚本已引入 `item-nbt-api` 时，物品自定义数据必须按 `../external-libraries/item-nbt-api.md` 通过项目适配层的 `NBT.get(...)`/`NBT.modify(...)` 读写；不得为同一用途使用 `PersistentDataContainer`、`PersistentDataType` 或 `ItemMeta#getPersistentDataContainer()`。
+- 不得使用已弃用的 `NBTItem` 路径或其旧式 `applyNBT(...)`、`mergeNBT(...)` 等物品读写方法。索引或 Javadoc 标记 `@Deprecated` 时，必须阅读弃用描述和替代项，不能已知新 API 后继续写旧 API。
+- 这是性能与维护性约束：PDC 不应作为安装 `item-nbt-api` 后的物品数据回退方案。新增或迁移物品标记、标识符、数值、序列化数据时，将访问封装在项目的物品数据适配层；若同时编辑 `ItemMeta`，遵守专题中的安全写回顺序或使用 `NBT.modifyMeta(...)`。
 - 非物品对象的 PDC 用途不属于本条规则；审查时必须按实际接收对象确认，不能因出现同名 API 就把实体、方块或其它容器的数据访问误判为物品数据。
 
 ## 配置与资源

@@ -33,7 +33,7 @@
 | `docs/02-development-workflow.md` | 从需求到构建验证的完整流程 | 开发、修复和评审时 |
 | `docs/03-template-contract.md` | `template-site` 生成项目的结构与构建约定 | 新建项目或改构建脚本时 |
 | `docs/gui/` | 硬编码与配置驱动的 Minecraft 箱子容器菜单、图标、交互与重载边界 | 设计或修改 `Inventory` 菜单时 |
-| `docs/external-libraries/` | `ItemPacketModifier` 客户端虚拟 Lore、`EvalEx-j8` 配置公式及其接入、重定位、生命周期和验证边界 | 引入这两项嵌入式外部依赖时 |
+| `docs/external-libraries/` | `ItemPacketModifier` 客户端虚拟 Lore、`EvalEx-j8` 配置公式、`item-nbt-api` 物品自定义数据及其接入、重定位、生命周期和验证边界 | 引入这些嵌入式外部依赖时 |
 | `docs/pluginbase/` | `PluginBase` 主类、生命周期、模块、配置与打包规范 | 使用或修改 `PluginBase` 相关代码时 |
 | `docs/server-api/` | Spigot 优先、Paper 扩展、版本兼容与 NMS 边界 | 使用服务端 API 前 |
 | `docs/evidence/` | API 资料查询与证据记录要求 | 使用版本敏感接口前 |
@@ -47,9 +47,9 @@
 2. 填写并在每次任务恢复后阅读 `state/environment.json`，确认本机 `gradleUserHomes`；该文件存在时不得自行扫描默认 C 盘 Gradle 目录。
 3. 阅读 `docs/00-layout-and-usage.md`，确认当前项目中资料包的位置和可写目录。
 4. 阅读 `docs/01-agent-contract.md`，确认目标 Minecraft 版本、服务器 API 与兼容边界。
-5. 根据任务读取 `docs/02-development-workflow.md` 和对应专题文档。
-6. 遇到陌生 Gradle 依赖时，按 `docs/evidence/dependency-index-zoo-tool.md` 或 `docs/evidence/dependency-index-cli.md` 选择唯一查询通道：Zoo 工具存在时只调用工具，不执行依赖索引 CLI；否则直接执行具体 CLI 查询，不做 `status` 预检。初始化器已建立首次索引；仅在 Agent 实际修改依赖集合或用户明确要求时才允许 `sync`。
-7. 以索引定位的运行字节码签名为准；需要实现细节时，按 `docs/evidence/query-playbook.md` 优先直接读取 `sources.jar`，没有 sources 才临时下载 Vineflower 反编译主 JAR。将可复用的已验证结论记入 `state/notes/`。
+5. 根据任务读取 `docs/02-development-workflow.md` 和对应专题设计文档；设计文档已覆盖的职责、生命周期和选型不重复阅读框架源码。
+6. 仅当设计文档未覆盖、当前调用需要精确签名或运行语义、或项目事实与文档冲突时，才按 `docs/evidence/dependency-index-zoo-tool.md` 或 `docs/evidence/dependency-index-cli.md` 选择唯一查询通道：Zoo 工具存在时只调用工具，不执行依赖索引 CLI；否则直接执行具体 CLI 查询，不做 `status` 预检。PluginBase 的能力只看 `pluginBaseModules`，实际构件事实只看索引；不读取、不推断、不记录 `LibrariesResolver-Gradle` 的隐式版本。初始化器已建立首次索引；仅在 Agent 实际修改依赖集合或用户明确要求时才允许 `sync`。
+7. 以索引定位的运行字节码签名为准；需要设计文档未覆盖的实现细节时，按 `docs/evidence/query-playbook.md` 优先直接读取 `sources.jar`，没有 sources 才临时下载 Vineflower 反编译主 JAR。将可复用的已验证结论记入 `state/notes/`。
 8. 修改完成后按 `docs/quality/build-and-artifact-checklist.md` 执行构建与产物检查。
 
 ## 适用范围
@@ -68,7 +68,7 @@
 
 - **Spigot 优先**：未明确选择 Paper 时，不能调用 Paper 专用 API。
 - **证据优先**：类、方法、事件、弃用状态、线程要求和版本可用性必须以目标版本资料为准。
-- **PluginBase 优先**：框架已提供的生命周期、模块、调度、物品栏、物品编辑、配置和依赖处理能力，应先查框架资料再决定是否自行实现。
+- **PluginBase 优先**：框架已提供的生命周期、模块、调度、物品栏、物品编辑、配置和依赖处理能力，先按项目设计文档决定常规实现；只有文档未覆盖精确调用时才通过依赖索引查询实际构件资料。
 - **构建即验证**：依赖范围、Shadow 打包、重定位、`PluginBaseHolders` 索引和 `plugin.yml` 都是可运行性的一部分。
 - **不猜测**：证据不足时，记录阻塞原因和需要同步的资料，而不是伪造 API 或框架行为。
 

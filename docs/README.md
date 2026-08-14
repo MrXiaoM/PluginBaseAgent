@@ -25,6 +25,7 @@
 | `external-libraries/README.md` | 不属于 `PluginBase` 的嵌入式 Java 依赖的统一接入、取证、重定位与生命周期规则。 |
 | `external-libraries/item-packet-modifier.md` | `ItemPacketModifier` 的客户端侧虚拟 Lore：包监听、回传还原、性能与停用释放。 |
 | `external-libraries/evalex-j8.md` | `EvalEx-j8` 的配置公式：变量/结果校验、精度、缓存、并发与业务边界。 |
+| `external-libraries/item-nbt-api.md` | `item-nbt-api` 的真实 `ItemStack` 自定义数据：`NBT.get(...)`/`NBT.modify(...)`、弃用 `NBTItem` 禁令、`ItemMeta` 写回顺序、迁移与 PDC 边界。 |
 
 ## PluginBase
 
@@ -81,6 +82,7 @@
 | 新增 YAML 配置驱动箱子容器菜单 | `gui/config-driven-inventory-menus.md`、`pluginbase/modules-and-capabilities.md`、`pluginbase/configuration-database-and-libraries.md` |
 | 新增仅客户端可见的物品 Lore | `external-libraries/item-packet-modifier.md`、`quality/build-and-artifact-checklist.md`、`evidence/query-playbook.md` |
 | 新增服主可配置的数学公式或条件 | `external-libraries/evalex-j8.md`、`quality/review-checklist.md`、`quality/build-and-artifact-checklist.md` |
+| 新增真实 `ItemStack` 自定义数据 | `external-libraries/item-nbt-api.md`、`quality/coding-style.md`、`quality/review-checklist.md`；仅在需要精确成员时再读 `evidence/query-playbook.md`。 |
 | 新增 GUI/物品功能且需 Spigot/Paper 双端支持 | `pluginbase/modules-and-capabilities.md`、`pluginbase/lifecycle-and-main-class.md`、`server-api/api-selection.md` |
 | 增加 Paper-only 功能 | `server-api/api-selection.md`、`server-api/paper-extension-rules.md`、`evidence/evidence-policy.md` |
 | 增加配置、数据库或动态库 | `pluginbase/configuration-database-and-libraries.md`、`quality/review-checklist.md` |

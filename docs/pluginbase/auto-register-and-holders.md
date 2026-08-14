@@ -2,6 +2,8 @@
 
 PluginBase 使用 Holder 体系组织项目功能，并可在插件启用时自动发现和实例化模块。它不是“对全部 class 反射构造”的机制：候选类必须满足继承关系和注解条件，且构造器、优先级、可选依赖与 Shadow 索引都有明确约束。
 
+本文是创建普通项目 Holder/Module、选择本地 `AbstractModule`、添加 `@AutoRegister`、使用 `inst()` 与配置优先级时的首选依据。本文已覆盖的常规架构规则不得再通过阅读框架 `AbstractPluginHolder` 或 `AbstractModule` 源码重复确认；只有本文未定义、当前调用需要精确签名或运行语义，或构建/索引结果与本文冲突时，才通过依赖索引读取最小相关资料。
+
 ## 基础类型
 
 - `AbstractPluginHolder<T extends BukkitPlugin>`：持有主类实例的基础功能类，可参与配置重载、模块加载完成通知、停用通知、事件/命令注册等。
@@ -39,7 +41,7 @@ public final class CommandMain extends AbstractModule
 7. 按 `@AutoRegister.priority()` 升序构造，数值越小越早；默认优先级为 `1000`。
 8. 构造过程异常会由框架记录警告，不能据此假定模块已经可用。
 
-准确行为应随目标 PluginBase 版本重新核验。
+当前调用的精确签名或本文未覆盖的运行行为，以依赖索引返回的实际解析构件及最小相关资料为准；不得为重复确认上述流程而读取无关框架源码。
 
 ## `@AutoRegister` 的选项
 

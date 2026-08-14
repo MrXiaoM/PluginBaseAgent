@@ -37,7 +37,7 @@ public final class ExamplePlugin extends BukkitPlugin {
 | `disableDefaultConfig(boolean)` | 禁用默认 `config.yml` 加载 | 仅由不使用主配置的项目选择。 |
 | `enableConfigGotoFlag(boolean)` | 启用 `goto` 配置跳转 | 使用时核对路径和循环跳转边界。 |
 
-公开成员、默认值和版本差异必须查询目标 PluginBase 资料。
+公开成员、默认值和设计文档未覆盖的运行差异，必须查询依赖索引返回的实际解析构件资料；不读取或记录 PluginBase 的隐式版本字符串。
 
 ## 生命周期顺序
 
@@ -64,7 +64,7 @@ flowchart TD
     Q --> R[afterDisable]
 ```
 
-框架实际源码和目标 PluginBase 版本是顺序的最终依据。每个扩展点只做与其阶段相符的工作。
+本文件定义的生命周期顺序可作为常规实现依据。只有当前调用需要精确签名或运行语义、或构建/索引结果与本文冲突时，才查询实际解析构件的最小资料；每个扩展点只做与其阶段相符的工作。
 
 ## 生命周期扩展点
 

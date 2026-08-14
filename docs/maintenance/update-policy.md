@@ -16,10 +16,10 @@
 
 更新 PluginBase 或模块时：
 
-1. 记录升级前的版本、模块列表、构建结果和已知运行环境；
-2. 在实际完成依赖版本/模块变更后重建依赖索引；由 Gradle 解析新版本的主 JAR、sources/Javadoc；
+1. 记录升级前实际解析构件、模块列表、构建结果和已知运行环境；
+2. 在实际完成依赖或模块变更后重建依赖索引；由 Gradle 解析新的主 JAR、sources/Javadoc；
 3. 对 `BukkitPlugin`、Options、自动注册、调度、工厂、配置与实际使用的模块符号重新查询，并按需要直接读取 sources 或临时反编译；
-4. 审查模板依赖助手、LibrariesResolver 和 Shadow 规则是否需同步；
+4. 审查 `pluginBaseModules`、模板构建模型和 Shadow 规则是否需同步；不读取或记录 `LibrariesResolver-Gradle` 的隐式版本，实际构件信息只取自索引；
 5. 检查 `paper` 模块的工厂回退行为没有变化；
 6. 重新构建、检查重定位和 `PluginBaseHolders`；
 7. 在承诺环境启动，检查生命周期、模块加载、配置重载和停用；
@@ -41,7 +41,7 @@
 
 ## 更新模板与构建基础设施
 
-模板、Gradle、Shadow、LibrariesResolver 或 Java 设置变化时，比较而非覆盖：
+模板、Gradle、Shadow、PluginBase 模块构建模型或 Java 设置变化时，比较而非覆盖：
 
 - 插件和构建插件版本；
 - Maven 仓库；
@@ -72,7 +72,7 @@
 - Snapshot 坐标的 SHA-256 变化；
 - Maven 仓库或来源策略变化；
 - PluginBase 模块增删；
-- Java、Gradle、Shadow 或解析器升级影响构建行为；
+- Java、Gradle、Shadow 或解析构建模型升级影响构建行为；
 - Gradle 模块、可解析配置、依赖锁、版本目录、Wrapper 或已解析构件哈希变化；
 - API 文档出现弃用、实验性或线程语义变化；
 - 发现已有记录使用了错误生态、错误版本或不完整签名。

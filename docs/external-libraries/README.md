@@ -6,6 +6,7 @@
 | --- | --- | --- |
 | `ItemPacketModifier` | 经网络包在客户端侧临时显示物品 Lore，不改写服务端真实物品 | `item-packet-modifier.md` |
 | `EvalEx-j8` | 解析、校验并执行可配置的数学/布尔表达式 | `evalex-j8.md` |
+| `item-nbt-api` | 真实 `ItemStack` 自定义数据、迁移、`ItemMeta` 安全次序与 PDC 禁止边界 | `item-nbt-api.md` |
 
 ## 通用接入流程
 
@@ -19,9 +20,10 @@
 
 ## 版本与资料边界
 
-- `ItemPacketModifier` 与 `EvalEx-j8` 均按 Maven Central 构件处理；仓库配置应优先使用 `mavenCentral()`，不额外加入来源不明的仓库。
+- `ItemPacketModifier`、`EvalEx-j8` 与 `item-nbt-api` 均按 Maven Central 构件处理；仓库配置应优先使用 `mavenCentral()`，不额外加入来源不明的仓库。
 - 版本、包名、方法签名、线程安全性、传递依赖和许可证都以项目锁定版本的实际 Gradle 解析、运行 JAR 字节码、官方 POM、sources/Javadoc 为准。无法取得资料时，停止添加或调用未证明的类型。
 - 查询这些通用依赖时，按 `../evidence/query-playbook.md` 通过依赖索引定位 GAV、运行签名和资料路径；sources 存在时直接读取，缺少 sources 才临时反编译，并按证据格式记录结论。
+- `item-nbt-api` 的物品数据只使用 `NBT.get(...)`/`NBT.modify(...)`；索引或 Javadoc 显示成员 `@Deprecated` 时，必须阅读替代项，禁止使用已弃用的 `NBTItem` 路径。
 - 不把第三方库的业务输入视为可信：客户端数据、物品、配置公式、变量值和管理员可编辑文本都必须在项目边界验证。
 
 ## 打包与运行期审查

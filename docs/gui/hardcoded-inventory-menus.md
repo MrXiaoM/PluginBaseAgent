@@ -19,11 +19,10 @@
 
 计划阶段先读取当前项目的 `build.gradle.kts`：
 
-1. 从 `top.mrxiaom:LibrariesResolver-Gradle` 取得 PluginBase 的统一精确版本。
-2. 确认 `pluginBaseModules` 已包含 `gui`；同时确认是否需要 `paper` 提供 Spigot/Paper 双端库存工厂回退。
-3. 按 `../evidence/dependency-index-zoo-tool.md` 或 `../evidence/dependency-index-cli.md` 查询项目实际解析的 GUI 构件，定位 `IGuiHolder`、`GuiManager` 和计划调用的成员；需要完整实现语义时，再按 `../evidence/query-playbook.md` 直接读取其 `sources.jar`。
-4. 若菜单会使用 `ItemEditor`、`InventoryFactory`、物品 NBT、Action 或语言消息，确认实际已解析的对应模块构件；不要因 `gui` 已引入就假定这些能力存在。
-5. 阅读目标项目已有的 Holder、菜单和 `plugin.yml`。框架源码证明能力边界，不是可直接复制的完整业务菜单示例。
+1. 确认 `pluginBaseModules` 已包含 `gui`；同时确认是否需要 `paper` 提供 Spigot/Paper 双端库存工厂回退。不要读取、推断或记录 `LibrariesResolver-Gradle` 的隐式版本。
+2. 按 `../evidence/dependency-index-zoo-tool.md` 或 `../evidence/dependency-index-cli.md` 查询项目实际解析的 GUI 构件，定位 `IGuiHolder`、`GuiManager` 和计划调用的成员；需要完整实现语义时，再按 `../evidence/query-playbook.md` 直接读取其 `sources.jar`。
+3. 若菜单会使用 `ItemEditor`、`InventoryFactory`、物品 NBT、Action 或语言消息，确认实际已解析的对应模块构件；不要因 `gui` 已引入就假定这些能力存在。
+4. 阅读目标项目已有的 Holder、菜单和 `plugin.yml`。框架源码证明能力边界，不是可直接复制的完整业务菜单示例。
 
 若找不到实际解析的 `gui` 构件或计划调用的符号，不得根据其它版本、其它插件或记忆猜测签名；查询失败本身不允许自动同步。
 
@@ -89,7 +88,7 @@ src/main/java/<主包名>/
   ```
 
 - 对不使用 Adventure 的既有项目、原始颜色文本，或发光、模型数据、物品模型等辅助操作，使用 `ItemStackUtil` 的已验证方法，例如 `setItemDisplayName(...)`、`setItemLore(...)`、`setGlow(...)`、`setCustomModelData(...)` 与 `setItemModel(...)`；不要因方便直接散落 `ItemMeta` 操作。
-- 图标需要保留或附加物品自定义数据时，构建脚本已安装 `item-nbt-api` 就使用该依赖；不得改用 `PersistentDataContainer` 作为同一用途的替代方案。
+- 图标需要保留或附加物品自定义数据时，构建脚本已安装 `item-nbt-api` 就按 `../external-libraries/item-nbt-api.md` 使用适配层中的 `NBT.get(...)`/`NBT.modify(...)`；不得使用已弃用的 `NBTItem` 路径，也不得改用 `PersistentDataContainer` 作为同一用途的替代方案。若同时写 `ItemMeta`，遵守专题规定的安全顺序或使用 `NBT.modifyMeta(...)`。
 - `Material`、自定义模型、物品模型和具体工具方法都必须以目标 Minecraft/PluginBase 版本资料为准。当前文档的示例表达工具分层，不允许跳过依赖索引定位与同版本资料复核后猜测重载或版本可用性。
 
 ### 创建和填充
@@ -120,7 +119,7 @@ src/main/java/<主包名>/
 ## 物品数据与兼容
 
 - 物品展示和跨 Spigot/Paper 兼容优先使用 `AdventureItemStack`、`ItemStackUtil` 与项目已接入的 `ItemEditor`、`InventoryFactory` 或 `paper` 模块工厂；`paper` 模块不允许直接导入 Paper-only 业务 API。
-- 构建脚本已安装 `item-nbt-api` 时，菜单物品的自定义数据只能使用该依赖；不得用 `PersistentDataContainer` 作为同一用途的替代方案。
+- 构建脚本已安装 `item-nbt-api` 时，菜单物品的自定义数据只能按 `../external-libraries/item-nbt-api.md` 使用适配层中的 `NBT.get(...)`/`NBT.modify(...)`；不得使用已弃用的 `NBTItem` 路径，也不得用 `PersistentDataContainer` 作为同一用途的替代方案。
 - 不把显示名称、Lore、材质或自定义模型数据的跨版本行为当作常识；按目标 API 和框架版本查询资料。
 
 ## 最低验证

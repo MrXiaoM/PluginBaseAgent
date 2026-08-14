@@ -28,20 +28,21 @@ description: Guides development, maintenance, review, and version upgrades of Gr
 1. 先读取 `agent-dev/state/environment.json`，确认 `gradleUserHomes`；在上下文恢复后不得因丢失临时环境信息改查默认 C 盘缓存。需要单次诊断时才显式传入 `--gradle-user-home`。
 2. 原样记录用户指定的 Minecraft 版本；不得将 `1.21.11` 改为 `1.21.1`，不得把 `26.2` 改为旧式版本格式。若对版本命名有疑问，按 `agent-dev/docs/server-api/minecraft-version-integrity.md` 使用原样版本号查询 Wiki。
 3. 默认选择 Spigot API。只有用户明确选择 Paper，或目标项目已验证需要 Paper 专有能力时才进入 Paper 路径；PluginBase 的 `paper` 模块用于 Spigot/Paper 双端物品/库存工厂回退，不等于可直接调用 Paper API。
-4. 初始化或查询 PluginBase 资料时，读取 `build.gradle.kts` 中 `top.mrxiaom:LibrariesResolver-Gradle` 的精确版本；它是全部 PluginBase 模块的统一版本锚点。从 `pluginBaseModules` 识别实际启用模块，并只用该统一版本同步这些模块。不得逐个猜测、探测或预先获取未启用模块的版本。
-5. 涉及已有依赖、PluginBase 模块、服务端 API 或 Shadow 重定位时，先读取相关 `agent-dev/state/notes/*.md`；只把已验证且会影响后续实现的使用习惯、生命周期、封装、重定位边界和已拒绝方案更新到笔记。版本、依赖、模块或封装变化后，立即删除或更新过期笔记；完整规则见 `agent-dev/docs/evidence/dependency-notes.md`。
-6. 遇到陌生 Gradle 依赖时，先按 `agent-dev/docs/evidence/dependency-index-zoo-tool.md` 或 `agent-dev/docs/evidence/dependency-index-cli.md` 选择唯一查询通道：当前会话可调用 `pluginbase_dependency_index` 时必须只用 Zoo 工具，禁止为依赖索引查询或 `status` 执行 CLI；工具不存在时才可直接运行 CLI 具体查询，也不执行 `status` 预检。Skill 初始化已构建首次索引。只有 Agent 已实际添加、删除或变更 Gradle 依赖坐标、版本或所属配置，或用户明确要求时，才允许一次 `dependency_index.py sync --project .`；查询缺失、过期、无命中或资料不足均不得触发同步。已知接收者类型时，优先查询 `members` 并提供类型，使搜索沿 `extends`/`implements` 链报告真实声明处，不要反复执行 `javap`。
-7. 版本敏感调用先用索引定位 GAV、运行签名和资料路径；需要理解实现时，通过 `show` 的详细结果取得主 JAR 与 `sources.jar` 路径。存在 `sources.jar` 时，使用 `inspect_dependency.py source` 直接读取目标 `.java` 条目，不解包到 `state/`；不存在时，才用 `inspect_dependency.py decompile` 从 GitHub Releases 临时下载 Vineflower 并反编译主 JAR。反编译只用于理解实现，不能覆盖字节码签名或充当版本兼容证明；完整规程见 `agent-dev/docs/evidence/query-playbook.md`。
-8. 无法取得资料或查询不到符号时，停止猜测，报告已尝试来源与阻塞项；不得编造 API、反射字符串或近似版本。
-9. 使用 PluginBase 时：继承 `BukkitPlugin`，不覆写 `onLoad()`、`onEnable()`、`onDisable()`；将框架打入 Shadow JAR 并重定位；保持 `scanIgnore` 与 `shadowGroup` 一致；保留 `META-INF/PluginBaseHolders` 合并。
-10. 计划或修改箱子容器菜单时，查询实际已解析的 `gui` 模块；不能把其源码当作完整业务菜单示例。按实现方式阅读 `agent-dev/docs/gui/hardcoded-inventory-menus.md` 或 `agent-dev/docs/gui/config-driven-inventory-menus.md`；配置点击动作或语言时只在模块已启用的前提下继续查询 `actions`、`l10n`。
-11. 箱子容器菜单必须以每玩家独立 `IGuiHolder`/会话实例管理可变状态，明确顶部 Holder、slot、点击、拖拽、关闭、玩家退出、重载、点击锁与异步回调失效。YAML 模型、Action 和 L10n 不得绕过 Java 业务权限、事务或数据校验。
-12. 创建或编辑硬编码物品图标时，优先使用 `AdventureItemStack`；对非 Adventure 既有路径及发光/模型等辅助操作使用 `ItemStackUtil` 的已验证方法。不得在业务菜单中重复散落裸 `ItemMeta` 读改写流程。
-13. 使用 `ItemPacketModifier` 时，先读 `agent-dev/docs/external-libraries/item-packet-modifier.md`，从项目锁定的 Maven Central GAV 查询 POM、sources/Javadoc 与 `PacketEvents` 边界；它只用于客户端虚拟展示，必须幂等追加、准确还原客户端回传内容，并在重载/停用调用 `dispose()` 释放包监听器。
-14. 使用 `EvalEx-j8` 时，先读 `agent-dev/docs/external-libraries/evalex-j8.md`，从项目锁定的 Maven Central GAV 查询资料；配置公式必须限制变量、输入/结果类型、范围和 `BigDecimal` 精度/舍入，解析失败不得触发业务副作用，缓存表达式不得跨玩家或线程共享可变变量。
-15. 解析 Bukkit 枚举或注册表类型时使用 `Util.valueOr(...)`、`Util.valueOrNull(...)` 或对应 `Util.parse*` 方法；不要使用 `Enum.valueOf(...)` 或 `Material.valueOf(...)`。
-16. 构建脚本已安装 `item-nbt-api` 时，物品自定义数据必须用该依赖读写；不得对 `ItemStack`/`ItemMeta` 使用 `PersistentDataContainer`、`PersistentDataType` 或 `getPersistentDataContainer()` 作为替代方案。
-17. 修改后执行 `python agent-dev/tools/verify_plugin_project.py --project .`、项目 Gradle Wrapper 构建，并按 `agent-dev/docs/quality/build-and-artifact-checklist.md` 审查最终 JAR。
+4. 先读取任务对应的设计文档和目标项目相邻实现，再决定是否需要查询依赖资料。`agent-dev/docs/pluginbase/` 已覆盖主类、Holder、模块、生命周期、重定位和并发等设计边界；其结论足以指导架构和常规实现时，不得为了重复确认而读取 `AbstractPluginHolder`、`AbstractModule` 或其它框架源码。只有设计文档未覆盖、当前调用确实需要精确签名或运行语义，或构建、索引结果与文档冲突时，才查询并读取对应构件的最小资料条目。
+5. 不读取、不推断、不记录 `LibrariesResolver-Gradle` 的隐式 PluginBase 版本，也不将其作为模块选择或 API 调用的依据。先确认 `pluginBaseModules` 是否声明所需能力；需要实际构件、GAV、公开运行签名或资料路径时，只查询 Gradle 依赖索引。确实改变模块集合时，只修改 `pluginBaseModules`，并在获准同步的条件下重建索引后查询实际解析结果。
+6. 涉及已有依赖、PluginBase 模块、服务端 API 或 Shadow 重定位时，先读取相关 `agent-dev/state/notes/*.md`；只把已验证且会影响后续实现的使用习惯、生命周期、封装、重定位边界和已拒绝方案更新到笔记。依赖、模块或封装变化后，立即删除或更新过期笔记；完整规则见 `agent-dev/docs/evidence/dependency-notes.md`。
+7. 遇到陌生 Gradle 依赖或设计文档不能回答的精确 API 问题时，先按 `agent-dev/docs/evidence/dependency-index-zoo-tool.md` 或 `agent-dev/docs/evidence/dependency-index-cli.md` 选择唯一查询通道：当前会话可调用 `pluginbase_dependency_index` 时必须只用 Zoo 工具，禁止为依赖索引查询或 `status` 执行 CLI；工具不存在时才可直接运行 CLI 具体查询，也不执行 `status` 预检。Skill 初始化已构建首次索引。只有 Agent 已实际添加、删除或变更 Gradle 依赖坐标、版本或所属配置，或用户明确要求时，才允许一次 `dependency_index.py sync --project .`；查询缺失、过期、无命中或资料不足均不得触发同步。已知接收者类型时，优先查询 `members` 并提供类型，使搜索沿 `extends`/`implements` 链报告真实声明处，不要反复执行 `javap`。
+8. 版本敏感调用先用索引定位 GAV、运行签名和资料路径；需要理解设计文档未覆盖的实现细节时，通过 `show` 的详细结果取得主 JAR 与 `sources.jar` 路径。存在 `sources.jar` 时，使用 `inspect_dependency.py source` 直接读取目标 `.java` 条目，不解包到 `state/`；不存在时，才用 `inspect_dependency.py decompile` 从 GitHub Releases 临时下载 Vineflower并反编译主 JAR。反编译只用于理解实现，不能覆盖字节码签名或充当版本兼容证明；完整规程见 `agent-dev/docs/evidence/query-playbook.md`。
+9. 无法取得资料或查询不到符号时，停止猜测，报告已尝试来源与阻塞项；不得编造 API、反射字符串或近似版本。
+10. 使用 PluginBase 时：继承 `BukkitPlugin`，不覆写 `onLoad()`、`onEnable()`、`onDisable()`；将框架打入 Shadow JAR 并重定位；保持 `scanIgnore` 与 `shadowGroup` 一致；保留 `META-INF/PluginBaseHolders` 合并。
+11. 计划或修改箱子容器菜单时，先读对应菜单设计文档；仅需确认当前任务调用的精确签名时查询实际已解析的 `gui` 模块。不能把其源码当作完整业务菜单示例。按实现方式阅读 `agent-dev/docs/gui/hardcoded-inventory-menus.md` 或 `agent-dev/docs/gui/config-driven-inventory-menus.md`；配置点击动作或语言时只在模块已启用的前提下继续查询 `actions`、`l10n`。
+12. 箱子容器菜单必须以每玩家独立 `IGuiHolder`/会话实例管理可变状态，明确顶部 Holder、slot、点击、拖拽、关闭、玩家退出、重载、点击锁与异步回调失效。YAML 模型、Action 和 L10n 不得绕过 Java 业务权限、事务或数据校验。
+13. 创建或编辑硬编码物品图标时，优先使用 `AdventureItemStack`；对非 Adventure 既有路径及发光/模型等辅助操作使用 `ItemStackUtil` 的已验证方法。不得在业务菜单中重复散落裸 `ItemMeta` 读改写流程。
+14. 使用 `ItemPacketModifier` 时，先读 `agent-dev/docs/external-libraries/item-packet-modifier.md`，从项目锁定的 Maven Central GAV 查询 POM、sources/Javadoc 与 `PacketEvents` 边界；它只用于客户端虚拟展示，必须幂等追加、准确还原客户端回传内容，并在重载/停用调用 `dispose()` 释放包监听器。
+15. 使用 `EvalEx-j8` 时，先读 `agent-dev/docs/external-libraries/evalex-j8.md`，从项目锁定的 Maven Central GAV 查询资料；配置公式必须限制变量、输入/结果类型、范围和 `BigDecimal` 精度/舍入，解析失败不得触发业务副作用，缓存表达式不得跨玩家或线程共享可变变量。
+16. 构建脚本已安装 `item-nbt-api` 时，先读 `agent-dev/docs/external-libraries/item-nbt-api.md`；物品自定义数据必须集中在项目适配层，并使用 `NBT.get(...)`/`NBT.modify(...)` 读写。不得使用已弃用的 `NBTItem` 路径，也不得对 `ItemStack`/`ItemMeta` 使用 `PersistentDataContainer`、`PersistentDataType` 或 `getPersistentDataContainer()` 作为替代方案；`ItemMeta` 写回次序遵守专题文档。
+17. 解析 Bukkit 枚举或注册表类型时使用 `Util.valueOr(...)`、`Util.valueOrNull(...)` 或对应 `Util.parse*` 方法；不要使用 `Enum.valueOf(...)` 或 `Material.valueOf(...)`。
+18. 修改后执行 `python agent-dev/tools/verify_plugin_project.py --project .`、项目 Gradle Wrapper 构建，并按 `agent-dev/docs/quality/build-and-artifact-checklist.md` 审查最终 JAR。
 
 ## 文档导航
 
@@ -51,6 +52,7 @@ description: Guides development, maintenance, review, and version upgrades of Gr
 - 外部依赖总览：`agent-dev/docs/external-libraries/README.md`
 - `ItemPacketModifier` 客户端虚拟 Lore：`agent-dev/docs/external-libraries/item-packet-modifier.md`
 - `EvalEx-j8` 配置公式：`agent-dev/docs/external-libraries/evalex-j8.md`
+- `item-nbt-api` 物品自定义数据：`agent-dev/docs/external-libraries/item-nbt-api.md`
 - 开发总流程：`agent-dev/docs/02-development-workflow.md`
 - 模板和构建：`agent-dev/docs/03-template-contract.md`
 - PluginBase：`agent-dev/docs/pluginbase/overview.md`

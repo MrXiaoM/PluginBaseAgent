@@ -47,9 +47,9 @@ val pluginBaseModules = base.modules.run { listOf(library, misc) }
 val shadowGroup = "<插件私有包>.libs"
 ```
 
-`LibraryHelper` 由构建脚本中的 `top.mrxiaom:LibrariesResolver-Gradle:<版本>` 提供，负责对齐 PluginBase 相关依赖、初始化 Java 设置和发布设置。该构件的**精确版本**是当前项目所有 PluginBase 模块的统一版本锚点：`base.modules` 中的 `library`、`misc`、`paper` 等模块均应使用这一版本，不应逐个查询、猜测或手写不同版本的模块坐标。
+`LibraryHelper` 由构建脚本声明的 `top.mrxiaom:LibrariesResolver-Gradle` 构件提供，负责对齐 PluginBase 相关依赖、初始化 Java 设置和发布设置。`base.modules` 中的 `library`、`misc`、`paper` 等模块必须通过该构建模型声明，不应逐个手写模块坐标。
 
-新增或删除框架能力时，应调整 `pluginBaseModules`，而不是手写不受版本管理的模块坐标。依赖集合实际变化后，按受限同步规则重建索引；Gradle 会解析 `pluginBaseModules` 中实际启用模块的主 JAR、sources/Javadoc。未启用模块既不随插件打包，也不需要预先获取资料。
+这段是构建模型说明，不是 Agent 的版本检查流程。Agent 不读取、不推断、不记录 `LibrariesResolver-Gradle` 的隐式版本；新增或删除框架能力时，只调整 `pluginBaseModules`。依赖集合实际变化并获准同步后，Gradle 会解析实际启用模块的主 JAR、sources/Javadoc；需要 GAV、签名或资料路径时只查询依赖索引。未启用模块既不随插件打包，也不需要预先获取资料。
 
 模板基线模块为 `library` 与 `misc`。可根据需求加入：
 
@@ -63,7 +63,7 @@ val shadowGroup = "<插件私有包>.libs"
 | `temporaryData` | 使用临时数据模块 |
 | `magic` | 使用 Magic 模块的已验证能力 |
 
-模块的准确功能、版本和公共符号以对应版本的 PluginBase 资料为准，详见 `pluginbase/modules-and-capabilities.md`。
+模块的准确功能和公共符号以依赖索引返回的实际解析构件及最小资料为准，详见 `pluginbase/modules-and-capabilities.md`。
 
 ## 依赖范围
 
@@ -162,7 +162,7 @@ folia-supported: true
 
 模板站点和 PluginBase 都会演进。升级或重新生成项目时，先比较：
 
-- Gradle、Shadow、PluginBase 和 LibrariesResolver 版本；
+- Gradle、Shadow、PluginBase 模块声明和实际解析构件；
 - 仓库和依赖坐标；
 - Java 初始化和 `targetJavaVersion`；
 - `shadowJar` 的重定位、重复文件和 `PluginBaseHolders` 配置；
